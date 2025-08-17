@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OBS 실시간 자막</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: transparent;
+            font-family: 'Malgun Gothic', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .subtitle-container {
+            position: fixed;
+            bottom: 10%;
+            left: 50%;
+            transform: translateX(-50%);
+            max-width: 90vw;
+            text-align: center;
+            z-index: 1000;
+        }
+
+        .subtitle-text {
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 16px 24px;
+            border-radius: 8px;
+            font-size: 32px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.9);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            line-height: 1.4;
+            word-wrap: break-word;
+            display: none;
+        }
+
+        .subtitle-text.show {
+            display: inline-block;
+        }
+
+        .loading {
+            background: rgba(30, 64, 175, 0.8);
+            border: 2px solid rgba(59, 130, 246, 0.5);
+            color: #bfdbfe;
+        }
+
+        .loading::after {
+            content: "번역 중...";
+            margin-left: 8px;
+        }
+
+        .status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            z-index: 1001;
+        }
+
+        .status.connected {
+            color: #10b981;
+        }
+
+        .status.disconnected {
+            color: #ef4444;
+        }
+    </style>
+</head>
+<body>
+    <div class="status" id="status">연결 중...</div>
+    <div class="subtitle-container">
+        <div class="subtitle-text" id="subtitle"></div>
+    </div>
+
+    <script>
+        class ObsSubtitleClient {
+            constructor() {
+                this.subtitle = document.getElementById('subtitle');
+                this.status = document.getElementById('status');
+                this.lastUpdate = Date.now();
+                this.hideTimeout = null;
+                
+                // 설정 (기본값)
+                this.settings = {
+                    position: 'bottom',
+                    textAlign: 'center',
+                    fontSize: 32,
+                    backgroundColor: 'rgba(0,0,0,0.8)',
+                    textColor: '#ffffff',
+                    borderRadius: 8,
+                    padding: 16,
+                    margin: 32,
+                    opacity: 1,
+                    offsetX: 0,
+                    offsetY: 0,
+                    autoHideTime: 5000
+                };
+                
+                this.init();
+            }
+            
+            init() {
+                // API 호스트 자동 감지
+                this.apiHost = this.getApiHost();
+                this.updateStatus('연결 중...', 'connecting');
+                
+                // 5초 후 자동 시작
+                setTimeout(() => {
+                    this.startPolling();
+                }, 5000);
+                
+                // URL 파라미터로 설정 오버라이드
+                this.loadUrlSettings();
+                this.applySettings();
+                
+                console.log('OBS 자막 클라이언트 초기화 완료');
+            }
+            
+            getApiHost() {
+                const hostname = window.location.hostname;
+                const protocol = window.location.protocol;
+                const port = window.location.port;
+                
+                if (hostname === 'localhost' || hostname === '127.0.0.1') {
+                    return `${protocol}//${hostname}:${port || '3000'}`;
+                }
+                
+                return `${protocol}//${hostname}`;
+            }
+            
+            loadUrlSettings() {
+                const params = new URLSearchParams(window.location.search);
+                
+                // URL 파라미터에서 설정 로드
+                Object.keys(this.settings).forEach(key => {
+                    const value = params.get(key);
+                    if (value !== null) {
+                        if (['fontSize', 'borderRadius', 'padding', 'margin', 'offsetX', 'offsetY', 'opacity', 'autoHideTime'].includes(key)) {
+                            this.settings[key] = parseFloat(value);
+                        } else {
+                            this.settings[key] = value;
+                        }
+                    }
+                });
+                
+                console.log('설정 로드됨:', this.settings);
+            }
+            
+            applySettings() {
+                const container = document.querySelector('.subtitle-container');
+                const subtitleText = this.subtitle;
+                
+                // 컨테이너 위치 설정
+                container.style.position = 'fixed';
+                container.style.maxWidth = '90vw';
+                container.style.textAlign = this.settings.textAlign;
+                container.style.zIndex = '1000';
+                
+                // 위치 설정
+                if (this.settings.position === 'top') {
+                    container.style.top = this.settings.margin + 'px';
+                    container.style.bottom = 'auto';
+                } else if (this.settings.position === 'center') {
+                    container.style.top = '50%';
+                    container.style.bottom = 'auto';
+                    container.style.transform = 'translateX(-50%) translateY(-50%)';
+                } else {
+                    container.style.bottom = this.settings.margin + 'px';
+                    container.style.top = 'auto';
+                }
+                
+                container.style.left = '50%';
+                container.style.transform += ` translate(${this.settings.offsetX}px, ${this.settings.offsetY}px)`;
+                
+                // 텍스트 스타일 설정
+                subtitleText.style.backgroundColor = this.settings.backgroundColor;
+                subtitleText.style.color = this.settings.textColor;
+                subtitleText.style.fontSize = this.settings.fontSize + 'px';
+                subtitleText.style.padding = this.settings.padding + 'px';
+                subtitleText.style.borderRadius = this.settings.borderRadius + 'px';
+                subtitleText.style.opacity = this.settings.opacity;
+                
+                console.log('스타일 적용 완료');
+            }
+            
+            async startPolling() {
+                this.updateStatus('API 연결 시도...', 'connecting');
+                
+                try {
+                    const response = await fetch(`${this.apiHost}/api/subtitle`);
+                    if (response.ok) {
+                        this.updateStatus('연결됨', 'connected');
+                        this.pollData();
+                    } else {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                } catch (error) {
+                    console.error('API 연결 실패:', error);
+                    this.updateStatus('연결 실패 - 재시도 중...', 'disconnected');
+                    setTimeout(() => this.startPolling(), 3000);
+                }
+            }
+            
+            async pollData() {
+                try {
+                    const response = await fetch(`${this.apiHost}/api/subtitle`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    this.handleSubtitleData(data);
+                    this.lastUpdate = Date.now();
+                    
+                } catch (error) {
+                    console.error('데이터 폴링 오류:', error);
+                    this.updateStatus('연결 끊어짐 - 재연결 중...', 'disconnected');
+                    setTimeout(() => this.startPolling(), 3000);
+                    return;
+                }
+                
+                // 500ms마다 폴링 (실시간 설정 반영)
+                setTimeout(() => this.pollData(), 500);
+            }
+            
+            handleSubtitleData(data) {
+                if (!data) return;
+                
+                console.log('자막 데이터 수신:', data);
+                
+                // 번역 중일 때
+                if (data.isTranslating && data.originalText) {
+                    this.showSubtitle('번역 중...', true);
+                    return;
+                }
+                
+                // 번역된 텍스트가 있을 때
+                if (data.translatedText && data.translatedText.trim()) {
+                    this.showSubtitle(data.translatedText, false);
+                    this.scheduleHide();
+                } else if (!data.isListening) {
+                    // 음성 인식이 꺼져있고 텍스트가 없으면 숨김
+                    this.hideSubtitle();
+                }
+                
+                // 상태 업데이트
+                if (data.isListening) {
+                    this.updateStatus('음성 인식 활성', 'connected');
+                } else {
+                    this.updateStatus('음성 인식 대기', 'connected');
+                }
+            }
+            
+            showSubtitle(text, isLoading = false) {
+                this.subtitle.textContent = text;
+                this.subtitle.className = `subtitle-text show ${isLoading ? 'loading' : ''}`;
+                
+                // 기존 숨기기 타이머 취소
+                if (this.hideTimeout) {
+                    clearTimeout(this.hideTimeout);
+                    this.hideTimeout = null;
+                }
+                
+                console.log('자막 표시:', text);
+            }
+            
+            hideSubtitle() {
+                this.subtitle.className = 'subtitle-text';
+                if (this.hideTimeout) {
+                    clearTimeout(this.hideTimeout);
+                    this.hideTimeout = null;
+                }
+                console.log('자막 숨김');
+            }
+            
+            scheduleHide() {
+                if (this.hideTimeout) {
+                    clearTimeout(this.hideTimeout);
+                }
+                
+                this.hideTimeout = setTimeout(() => {
+                    this.hideSubtitle();
+                }, this.settings.autoHideTime);
+            }
+            
+            updateStatus(message, type) {
+                this.status.textContent = message;
+                this.status.className = `status ${type}`;
+                console.log('상태:', message);
+            }
+        }
+        
+        // 페이지 로드 시 클라이언트 시작
+        document.addEventListener('DOMContentLoaded', () => {
+            new ObsSubtitleClient();
+        });
+        
+        // 에러 핸들링
+        window.addEventListener('error', (error) => {
+            console.error('클라이언트 오류:', error);
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx create-next-app:*)",
+      "Bash(cmd /c \"npx create-next-app@latest live-translate-overlay --typescript --tailwind --eslint --app --src-dir --import-alias @/* --yes\")",
+      "Bash(powershell:*)",
+      "Bash(mkdir:*)"
+    ],
+    "deny": [],
+    "ask": [],
+    "additionalDirectories": [
+      "C:\\coding\\live-translate-overlay"
+    ]
+  }
+}

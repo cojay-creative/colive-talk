@@ -1,0 +1,38 @@
+{
+  "name": "corailve-talk",
+  "version": "1.0.0",
+  "description": "Live streaming subtitle translation service",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "dev-https": "next dev --experimental-https",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "lint:fix": "next lint --fix",
+    "type-check": "tsc --noEmit",
+    "export": "next build",
+    "deploy": "npm run build",
+    "deploy:vercel": "vercel --prod",
+    "deploy:vercel:public": "vercel --prod --public",
+    "preview:vercel": "vercel",
+    "analyze": "cross-env ANALYZE=true npm run build"
+  },
+  "dependencies": {
+    "next": "^14.2.31",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "@types/node": "^20.14.10",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "typescript": "^5.6.3"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "eslint-config-next": "^14.2.31",
+    "cross-env": "^7.0.3"
+  }
+}
