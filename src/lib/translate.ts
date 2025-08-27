@@ -8,8 +8,9 @@ export class FreeTranslationService {
     { url: 'https://translate.terraprint.co/translate', type: 'libretranslate' }
   ];
   
-  private cache = new Map<string, string>();
+  private cache = new Map<string, {translation: string, timestamp: number}>();
   private readonly CACHE_SIZE = 100;
+  private readonly CACHE_EXPIRE_TIME = 30 * 1000; // 30초 후 캐시 만료
   private lastApiCall = 0;
   private readonly MIN_API_INTERVAL = 50; // 초창기 스타일: 더 빠른 응답
   
@@ -53,13 +54,25 @@ export class FreeTranslationService {
     return `${sourceLang}:${targetLang}:${text.toLowerCase().trim()}`;
   }
 
-  // 캐시에서 번역 조회
+  // 캐시에서 번역 조회 (만료 시간 체크)
   private getFromCache(text: string, sourceLang: string, targetLang: string): string | null {
     const key = this.getCacheKey(text, sourceLang, targetLang);
-    return this.cache.get(key) || null;
+    const cached = this.cache.get(key);
+    
+    if (!cached) return null;
+    
+    // 캐시 만료 체크
+    const now = Date.now();
+    if (now - cached.timestamp > this.CACHE_EXPIRE_TIME) {
+      console.log('🗑️ 캐시 만료로 삭제:', text.substring(0, 30));
+      this.cache.delete(key);
+      return null;
+    }
+    
+    return cached.translation;
   }
 
-  // 캐시에 번역 저장
+  // 캐시에 번역 저장 (타임스탬프 포함)
   private saveToCache(text: string, sourceLang: string, targetLang: string, translation: string) {
     const key = this.getCacheKey(text, sourceLang, targetLang);
     
@@ -69,7 +82,10 @@ export class FreeTranslationService {
       this.cache.delete(firstKey);
     }
     
-    this.cache.set(key, translation);
+    this.cache.set(key, {
+      translation,
+      timestamp: Date.now()
+    });
   }
 
   // API 호출 간격 제한

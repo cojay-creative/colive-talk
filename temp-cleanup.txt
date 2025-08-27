@@ -1,4 +1,0 @@
-Files to remove:
-- robots.txt (wrong location)
-- sitemap.xml (wrong location)
-- robots.ts, sitemap.ts (might conflict)

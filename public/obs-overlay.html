@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Colive Talk - OBS Overlay</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        html, body {
+            width: 100vw;
+            height: 100vh;
+            background: transparent;
+            font-family: 'Noto Sans KR', Arial, sans-serif;
+            overflow: hidden;
+        }
+        
+        .overlay-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: transparent;
+            pointer-events: none;
+            z-index: 9999;
+        }
+        
+        .subtitle {
+            position: absolute;
+            bottom: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            padding: 16px 24px;
+            border-radius: 8px;
+            text-align: center;
+            max-width: 80%;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            border: 2px solid rgba(255,255,255,0.3);
+            line-height: 1.4;
+            word-break: keep-all;
+            white-space: pre-wrap;
+            display: none;
+        }
+        
+        .subtitle.show {
+            display: block;
+        }
+        
+        .debug-info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.9);
+            color: #00ff00;
+            font-size: 12px;
+            font-family: monospace;
+            padding: 10px;
+            border-radius: 5px;
+            max-width: 400px;
+            max-height: 300px;
+            overflow: auto;
+            pointer-events: auto;
+            z-index: 10000;
+            display: none;
+        }
+        
+        .debug-info.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="overlay-container">
+        <div id="subtitle" class="subtitle">
+            안녕하세요! 음성인식을 시작해주세요 🎤
+        </div>
+        
+        <div id="debug" class="debug-info">
+            <div style="margin-bottom: 10px; font-weight: bold;">DEBUG INFO</div>
+            <div id="debug-content"></div>
+        </div>
+    </div>
+
+    <script>
+        console.log('🎬 OBS 오버레이 시작');
+        
+        let debugInfo = [];
+        let adminSettings = {
+            inactiveMessage: '안녕하세요! 음성인식을 시작해주세요 🎤',
+            listeningMessage: '음성을 듣고 있습니다...',
+            translatingMessage: '번역 중...'
+        };
+        
+        const subtitle = document.getElementById('subtitle');
+        const debugDiv = document.getElementById('debug');
+        const debugContent = document.getElementById('debug-content');
+        
+        // URL 파라미터 확인
+        const params = new URLSearchParams(window.location.search);
+        const showDebug = params.get('debug') === 'true';
+        const sessionId = params.get('sessionId');
+        
+        if (showDebug) {
+            debugDiv.classList.add('show');
+        }
+        
+        function addDebugInfo(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            debugInfo.unshift(`[${timestamp}] ${message}`);
+            debugInfo = debugInfo.slice(0, 20);
+            
+            if (debugContent) {
+                debugContent.innerHTML = debugInfo
+                    .map(info => `<div style="font-size: 10px; opacity: 0.8;">${info}</div>`)
+                    .join('');
+            }
+            
+            console.log('🔍 DEBUG:', message);
+        }
+        
+        function updateSubtitle(data) {
+            let displayText = '';
+            
+            if (data.translatedText) {
+                displayText = data.translatedText;
+                addDebugInfo(`번역 텍스트 표시: ${data.translatedText}`);
+            } else if (data.originalText) {
+                displayText = data.originalText;
+                addDebugInfo(`원본 텍스트 표시: ${data.originalText}`);
+            } else if (!data.isListening) {
+                displayText = adminSettings.inactiveMessage;
+                addDebugInfo('관리자 안내 메시지 표시');
+            } else {
+                displayText = adminSettings.listeningMessage;
+                addDebugInfo('관리자 듣기 메시지 표시');
+            }
+            
+            subtitle.textContent = displayText;
+            subtitle.classList.add('show');
+        }
+        
+        // 관리자 설정 로드
+        async function loadAdminSettings() {
+            try {
+                const response = await fetch('/api/admin-settings');
+                if (response.ok) {
+                    const result = await response.json();
+                    adminSettings = result.settings;
+                    addDebugInfo('관리자 설정 로드 완료');
+                }
+            } catch (error) {
+                addDebugInfo('관리자 설정 로드 실패, 기본값 사용');
+            }
+        }
+        
+        // localStorage 폴링
+        function pollLocalStorage() {
+            try {
+                const stored = localStorage.getItem('subtitle_sync_data');
+                if (stored) {
+                    const data = JSON.parse(stored);
+                    addDebugInfo(`localStorage: 원본="${data.originalText}" 번역="${data.translatedText}"`);
+                    updateSubtitle(data);
+                    return true;
+                }
+            } catch (error) {
+                addDebugInfo(`localStorage 오류: ${error.message}`);
+            }
+            return false;
+        }
+        
+        // PostMessage 리스너
+        window.addEventListener('message', (event) => {
+            try {
+                if (event.data && event.data.type === 'SUBTITLE_UPDATE') {
+                    addDebugInfo(`PostMessage: 원본="${event.data.originalText}" 번역="${event.data.translatedText}"`);
+                    updateSubtitle(event.data);
+                }
+            } catch (error) {
+                addDebugInfo(`PostMessage 오류: ${error.message}`);
+            }
+        });
+        
+        // 서버에서 데이터 가져오기 (OBS 전용)
+        async function pollServer() {
+            try {
+                if (!sessionId) {
+                    addDebugInfo('세션 ID가 없어서 API 호출 건너뜀');
+                    return false;
+                }
+                
+                // API에서 실시간 데이터 가져오기
+                const response = await fetch(`/api/subtitle-status?sessionId=${sessionId}`);
+                if (response.ok) {
+                    const result = await response.json();
+                    const data = result.data;
+                    
+                    if (data && (data.originalText || data.translatedText)) {
+                        addDebugInfo(`서버 API: 원본="${data.originalText}" 번역="${data.translatedText}"`);
+                        updateSubtitle(data);
+                        return true;
+                    }
+                }
+            } catch (error) {
+                addDebugInfo(`API 오류: ${error.message}`);
+            }
+            return false;
+        }
+        
+        // 멀티플 동기화 시도 (API 우선)
+        async function syncData() {
+            // 1. 서버 API 시도 (OBS에서 가장 안정적)
+            if (await pollServer()) return;
+            
+            // 2. localStorage 시도 (브라우저 환경용)
+            if (pollLocalStorage()) return;
+            
+            // 3. PostMessage는 이벤트 기반이므로 별도로 처리됨
+        }
+        
+        // 초기화
+        addDebugInfo('오버레이 초기화 완료');
+        addDebugInfo(`디버그 모드: ${showDebug ? 'ON' : 'OFF'}`);
+        addDebugInfo(`세션 ID: ${sessionId || '없음'}`);
+        addDebugInfo('동기화 방법: API + localStorage + PostMessage (API 우선)');
+        
+        // 관리자 설정 로드
+        loadAdminSettings();
+        
+        // 정기적 동기화 (200ms 간격)
+        setInterval(syncData, 200);
+        
+        // 초기 동기화
+        syncData();
+        
+        subtitle.classList.add('show');
+    </script>
+</body>
+</html>

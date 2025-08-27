@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>간단한 OBS 오버레이</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: transparent;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        .subtitle {
+            position: fixed;
+            bottom: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            font-size: 24px;
+            padding: 16px 24px;
+            border-radius: 8px;
+            text-align: center;
+            max-width: 80%;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            border: 2px solid rgba(255,255,255,0.3);
+            line-height: 1.4;
+            word-break: keep-all;
+            white-space: pre-wrap;
+            z-index: 9999;
+        }
+        .debug {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.9);
+            color: #00ff00;
+            font-size: 12px;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            max-width: 400px;
+            max-height: 300px;
+            overflow: auto;
+            z-index: 10000;
+        }
+    </style>
+</head>
+<body>
+    <div id="subtitle" class="subtitle">안녕하세요! 음성인식을 시작해주세요 🎤</div>
+    <div id="debug" class="debug" style="display: none;">
+        <div><strong>DEBUG INFO</strong></div>
+        <div id="debug-content"></div>
+    </div>
+
+    <script>
+        // URL 파라미터 확인
+        const urlParams = new URLSearchParams(window.location.search);
+        const debug = urlParams.get('debug') === 'true';
+        const source = urlParams.get('source') || 'ko-KR';
+        const target = urlParams.get('target') || 'en';
+        const controls = urlParams.get('controls') !== 'false';
+
+        if (debug) {
+            document.getElementById('debug').style.display = 'block';
+        }
+
+        function addDebugInfo(message) {
+            if (debug) {
+                const debugContent = document.getElementById('debug-content');
+                const time = new Date().toLocaleTimeString();
+                debugContent.innerHTML = `[${time}] ${message}<br>` + debugContent.innerHTML;
+                if (debugContent.children.length > 20) {
+                    debugContent.removeChild(debugContent.lastChild);
+                }
+            }
+            console.log('DEBUG:', message);
+        }
+
+        function updateSubtitle(text) {
+            document.getElementById('subtitle').textContent = text;
+            addDebugInfo(`자막 업데이트: ${text}`);
+        }
+
+        function getDisplayText(data) {
+            if (data.translatedText) {
+                return data.translatedText;
+            }
+            if (data.originalText) {
+                return data.originalText;
+            }
+            if (!data.isListening) {
+                return '안녕하세요! 음성인식을 시작해주세요 🎤';
+            }
+            return '음성을 듣고 있습니다...';
+        }
+
+        function loadData() {
+            try {
+                const stored = localStorage.getItem('subtitle_sync_data');
+                if (stored) {
+                    const data = JSON.parse(stored);
+                    const displayText = getDisplayText(data);
+                    updateSubtitle(displayText);
+                    addDebugInfo(`데이터 로드: 원본="${data.originalText}" 번역="${data.translatedText}" 듣기=${data.isListening}`);
+                } else {
+                    addDebugInfo('localStorage에 데이터 없음');
+                }
+            } catch (error) {
+                addDebugInfo(`오류: ${error.message}`);
+            }
+        }
+
+        // 초기화
+        addDebugInfo(`초기화: source=${source}, target=${target}, controls=${controls}, debug=${debug}`);
+        addDebugInfo(`UserAgent: ${navigator.userAgent.substring(0, 50)}...`);
+        
+        // 데이터 로드
+        loadData();
+
+        // storage 이벤트 리스너
+        window.addEventListener('storage', function(e) {
+            if (e.key === 'subtitle_sync_data') {
+                addDebugInfo('Storage 이벤트 감지');
+                loadData();
+            }
+        });
+
+        // 200ms마다 폴링
+        setInterval(loadData, 200);
+
+        addDebugInfo('오버레이 초기화 완료');
+    </script>
+</body>
+</html>

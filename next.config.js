@@ -42,7 +42,57 @@ const nextConfig = {
   onDemandEntries: {
     maxInactiveAge: 25 * 1000,
     pagesBufferLength: 2,
-  }
+  },
+
+  // OBS Browser Source 호환성을 위한 헤더 설정
+  async headers() {
+    return [
+      {
+        // 오버레이 페이지만 iframe 허용
+        source: '/overlay/:path*',
+        headers: [
+          {
+            key: 'X-Frame-Options',
+            value: 'ALLOWALL', // OBS Browser Source 허용
+          },
+          {
+            key: 'Content-Security-Policy',
+            value: "frame-ancestors 'self' *;", // 모든 도메인에서 iframe 허용
+          },
+          {
+            key: 'Access-Control-Allow-Origin',
+            value: '*', // CORS 허용
+          },
+          {
+            key: 'Access-Control-Allow-Methods',
+            value: 'GET, POST, OPTIONS',
+          },
+          {
+            key: 'Access-Control-Allow-Headers',
+            value: 'Content-Type',
+          },
+        ],
+      },
+      {
+        // API 엔드포인트도 CORS 허용
+        source: '/api/:path*',
+        headers: [
+          {
+            key: 'Access-Control-Allow-Origin',
+            value: '*',
+          },
+          {
+            key: 'Access-Control-Allow-Methods', 
+            value: 'GET, POST, OPTIONS',
+          },
+          {
+            key: 'Access-Control-Allow-Headers',
+            value: 'Content-Type',
+          },
+        ],
+      },
+    ]
+  },
 }
 
 module.exports = nextConfig

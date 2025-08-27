@@ -1,135 +1,19 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, memo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import ErrorBoundary from '../components/ErrorBoundary';
+import Header from '../components/Header';
+import Sidebar from '../components/Sidebar';
 import { webSpeechService } from '../lib/speech';
 import { freeTranslationService } from '../lib/translate';
 import { syncService } from '../lib/sync';
 
-// 헤더 컴포넌트
-interface SimpleHeaderProps {
-  isDarkMode: boolean;
-  setIsDarkMode: () => void;
-  isListening: boolean;
-  toggleListening: () => void;
-  status: string;
-}
-
-const SimpleHeader = memo(({ isDarkMode, setIsDarkMode, isListening, toggleListening, status }: SimpleHeaderProps) => (
-  <header className={`${isDarkMode ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'} shadow-sm border-b transition-colors duration-300`}>
-    <div className="px-4 py-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div className="relative w-12 h-12">
-            <img 
-              src="/main-logo-24.png" 
-              alt="COJAY Logo" 
-              className="w-12 h-12 rounded-lg shadow-sm object-contain"
-            />
-          </div>
-          <div className="flex flex-col">
-            <h1 className={`text-xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>
-              Colive Talk
-            </h1>
-            <span className={`text-xs ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
-              실시간 자막 번역 서비스
-            </span>
-          </div>
-        </div>
-        
-        <div className="flex items-center space-x-2">
-          {/* 다크모드 토글 */}
-          <button
-            onClick={setIsDarkMode}
-            className={`p-2 rounded-md transition-all duration-200 ${
-              isDarkMode 
-                ? 'bg-gray-700 hover:bg-gray-600 text-yellow-400' 
-                : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
-            }`}
-            title={isDarkMode ? '라이트모드로 전환' : '다크모드로 전환'}
-          >
-            <span className="text-sm">{isDarkMode ? '☀️' : '🌙'}</span>
-          </button>
-          
-          <button
-            onClick={toggleListening}
-            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${
-              isListening
-                ? 'bg-red-600 hover:bg-red-700 text-white'
-                : 'bg-[#00B1A9] hover:bg-[#008F87] text-white'
-            }`}
-          >
-            <span className="text-xs">{isListening ? '🎤 중지' : '🎤 시작'}</span>
-          </button>
-          
-          <div className="flex items-center space-x-1">
-            <div className={`w-2 h-2 rounded-full transition-colors duration-200 ${
-              isListening ? 'bg-green-500' : isDarkMode ? 'bg-gray-500' : 'bg-gray-400'
-            }`}></div>
-            <span className={`text-xs ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-              {isListening ? '활성' : '대기'}
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
-  </header>
-));
-
-// 사이드바 컴포넌트
-interface SimpleSidebarProps {
-  isDarkMode: boolean;
-  currentSection: string;
-  setCurrentSection: (section: string) => void;
-}
-
-const SimpleSidebar = memo(({ isDarkMode, currentSection, setCurrentSection }: SimpleSidebarProps) => {
-  const menuItems = [
-    { id: 'control', label: '음성 인식 컨트롤', icon: '🎤' },
-    { id: 'settings', label: '언어 설정', icon: '🌍' },
-    { id: 'layout', label: '레이아웃 설정', icon: '⚙️' },
-    { id: 'font', label: '폰트 설정', icon: '✍️' },
-    { id: 'background', label: '배경 설정', icon: '🎨' },
-    { id: 'broadcast', label: '송출프로그램 연동', icon: '📺' }
-  ];
-
-  return (
-    <aside className={`w-56 shadow-sm border-r transition-colors duration-300 overflow-y-auto ${
-      isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
-    }`}>
-      <div className="p-4">
-        <nav className="space-y-2">
-          {menuItems.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setCurrentSection(item.id)}
-              className={`w-full flex items-center space-x-2 px-3 py-2 rounded-md transition-all duration-200 text-sm ${
-                currentSection === item.id
-                  ? isDarkMode 
-                    ? 'bg-[#00B1A9]/20 text-[#00B1A9] border border-[#00B1A9]/30'
-                    : 'bg-[#00B1A9]/10 text-[#00B1A9] border border-[#00B1A9]/20'
-                  : isDarkMode
-                    ? 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-800'
-              }`}
-            >
-              <span className="text-base">{item.icon}</span>
-              <span className="text-sm font-medium">{item.label}</span>
-            </button>
-          ))}
-        </nav>
-      </div>
-    </aside>
-  );
-});
-
 export default function Home() {
-  console.log('🎯 Home 컴포넌트 렌더링 시작');
-  
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [currentSection, setCurrentSection] = useState('control');
   const [isListening, setIsListening] = useState(false);
   const [status, setStatus] = useState('대기 중');
+  const [showSubtitlePreview, setShowSubtitlePreview] = useState(true);
   
   // 추가 상태들
   const [sourceLanguage, setSourceLanguage] = useState('ko-KR');
@@ -139,11 +23,32 @@ export default function Home() {
   const [isTranslating, setIsTranslating] = useState(false);
   const [error, setError] = useState('');
   
+  // 실시간 동기화를 위한 상태 (오버레이와 동일한 데이터)
+  const [syncedOriginalText, setSyncedOriginalText] = useState('');
+  const [syncedTranslatedText, setSyncedTranslatedText] = useState('');
+  const [syncedIsListening, setSyncedIsListening] = useState(false);
+  
+  // 중간 결과 처리를 위한 상태
+  const [interimText, setInterimText] = useState('');
+  const [interimTranslation, setInterimTranslation] = useState('');
+  const [translationTimer, setTranslationTimer] = useState<NodeJS.Timeout | null>(null);
+  
   // 오버레이 표시 옵션
   const [showOriginalInOverlay, setShowOriginalInOverlay] = useState(false);
   
   // 현재 URL 가져오기
   const [currentOrigin, setCurrentOrigin] = useState('');
+  
+  // 사용자별 고유 세션 ID
+  const [sessionId, setSessionId] = useState('');
+  
+  // 실시간 번역 설정
+  const [realtimeSettings, setRealtimeSettings] = useState({
+    enableInterimTranslation: true,    // 중간 결과 번역 활성화
+    interimThreshold: 8,                // 중간 번역 시작 글자 수
+    autoSegmentLength: 50,              // 자동 분할 길이 (글자 수)
+    translationDelay: 1000,             // 번역 지연 시간 (ms)
+  });
   
   // 레이아웃 설정 상태
   const [layoutSettings, setLayoutSettings] = useState({
@@ -157,33 +62,182 @@ export default function Home() {
     textAlign: 'center' as const
   });
   
-  // 단순한 동기화 함수
-  const updateSubtitles = useCallback((originalText: string, translatedText: string, isListening: boolean, isTranslating: boolean) => {
+  // API 기반 동기화 함수
+  const updateSubtitles = useCallback(async (originalText: string, translatedText: string, isListening: boolean, isTranslating: boolean) => {
     console.log('🔄 자막 업데이트:', { originalText, translatedText, isListening, isTranslating });
     
-    // localStorage에 직접 저장 (가장 확실한 방법)
+    const updateData = {
+      originalText,
+      translatedText,
+      isListening,
+      isTranslating,
+      sourceLanguage: sourceLanguage,
+      targetLanguage: targetLanguage,
+      status: isTranslating ? '번역 중' : '완료'
+    };
+    
+    // 1. syncService를 통한 localStorage 동기화
     try {
-      const data = {
-        originalText,
-        translatedText,
-        isListening,
-        isTranslating,
-        timestamp: Date.now(),
-        sourceLanguage: sourceLanguage,
-        targetLanguage: targetLanguage,
-        status: isTranslating ? '번역 중' : '완료'
+      syncService.updateData(updateData);
+      console.log('✅ syncService 업데이트 완료');
+    } catch (error) {
+      console.error('❌ syncService 업데이트 실패:', error);
+    }
+
+    // 2. API 서버에 데이터 전송 (OBS용) - 재시도 로직 포함
+    const sendToAPI = async (retryCount = 0) => {
+      try {
+        if (!sessionId) {
+          console.warn('⚠️ 세션 ID가 없어서 API 전송 건너뜀');
+          return false;
+        }
+        
+        const response = await fetch('/api/subtitle-status', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            sessionId,
+            ...updateData
+          }),
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          console.log('📡 API 전송 성공:', result);
+          return true;
+        } else {
+          console.warn('⚠️ API 전송 실패:', response.status);
+          return false;
+        }
+      } catch (error) {
+        console.error('❌ API 전송 오류:', error);
+        return false;
+      }
+    };
+
+    // 최대 2번 재시도
+    let success = await sendToAPI();
+    if (!success && updateData.translatedText) { // 번역된 텍스트가 있을 때만 재시도
+      console.log('🔄 API 전송 재시도...');
+      await new Promise(resolve => setTimeout(resolve, 200)); // 200ms 대기
+      success = await sendToAPI();
+      
+      if (!success) {
+        console.error('❌ API 전송 최종 실패 - OBS 동기화 안될 수 있음');
+      }
+    }
+
+    // 3. PostMessage를 통한 브로드캐스트 (브라우저 호환성)
+    try {
+      const postMessageData = {
+        type: 'SUBTITLE_UPDATE',
+        ...updateData,
+        timestamp: Date.now()
       };
       
-      localStorage.setItem('subtitle_sync_data', JSON.stringify(data));
-      console.log('✅ localStorage 업데이트 완료');
+      // 모든 프레임에 메시지 전송
+      window.postMessage(postMessageData, '*');
+      
+      // 만약 iframe이 있다면 그것들에도 전송
+      const iframes = document.querySelectorAll('iframe');
+      iframes.forEach(iframe => {
+        try {
+          iframe.contentWindow?.postMessage(postMessageData, '*');
+        } catch (e) {
+          // Cross-origin 제한으로 인한 에러는 무시
+        }
+      });
+      
+      console.log('📡 PostMessage 브로드캐스트 완료');
     } catch (error) {
-      console.error('❌ localStorage 업데이트 실패:', error);
+      console.error('❌ PostMessage 전송 실패:', error);
     }
-  }, [sourceLanguage, targetLanguage]);
+  }, [sourceLanguage, targetLanguage, sessionId]);
+
+  // 중간 결과 번역 함수 (디바운스 적용)
+  const handleInterimTranslation = useCallback(async (text: string) => {
+    if (!realtimeSettings.enableInterimTranslation) return;
+    if (text.length < realtimeSettings.interimThreshold) return;
+
+    console.log('🔄 중간 결과 번역:', text);
+    setInterimText(text);
+
+    // 기존 타이머 클리어
+    if (translationTimer) {
+      clearTimeout(translationTimer);
+    }
+
+    // 새 타이머 설정 (디바운스)
+    const newTimer = setTimeout(async () => {
+      try {
+        setIsTranslating(true);
+        console.log('🌍 중간 번역 시작:', text);
+        
+        const translated = await freeTranslationService.translate(text, targetLanguage, 'ko');
+        console.log('🌍 중간 번역 완료:', translated);
+        
+        setInterimTranslation(translated);
+        
+        // 중간 번역 결과도 완전한 형태로만 API 전송
+        console.log('📡 중간 번역 결과를 API에 전송:', { text, translated: `${translated} ⚡` });
+        updateSubtitles(text, `${translated} ⚡`, isListening, false); // isTranslating을 false로 변경
+        
+      } catch (error) {
+        console.error('❌ 중간 번역 실패:', error);
+      } finally {
+        setIsTranslating(false);
+      }
+    }, realtimeSettings.translationDelay);
+
+    setTranslationTimer(newTimer);
+  }, [targetLanguage, realtimeSettings, translationTimer, isListening, updateSubtitles]);
+
+  // 긴 문장 자동 분할 처리
+  const handleAutoSegmentation = useCallback(async (text: string) => {
+    if (text.length > realtimeSettings.autoSegmentLength) {
+      // 마지막 완성된 문장까지 찾기
+      const sentences = text.split(/[.!?。！？]/);
+      if (sentences.length > 1) {
+        const completeSentence = sentences.slice(0, -1).join('.') + '.';
+        console.log('🔪 문장 자동 분할:', completeSentence);
+        
+        // 완성된 부분만 번역
+        try {
+          setIsTranslating(true);
+          const translated = await freeTranslationService.translate(completeSentence, targetLanguage, 'ko');
+          
+          setOriginalText(completeSentence);
+          setTranslatedText(translated);
+          
+          // 자동 분할 번역 완료 후에만 API 전송
+          console.log('📡 자동 분할 번역 결과를 API에 전송:', { completeSentence, translated });
+          updateSubtitles(completeSentence, translated, isListening, false);
+          
+        } catch (error) {
+          console.error('❌ 자동 분할 번역 실패:', error);
+        } finally {
+          setIsTranslating(false);
+        }
+      }
+    }
+  }, [targetLanguage, realtimeSettings.autoSegmentLength, isListening, updateSubtitles]);
   
   useEffect(() => {
     if (typeof window !== 'undefined') {
       setCurrentOrigin(window.location.origin);
+      
+      // 고유한 세션 ID 생성 또는 기존 세션 복구
+      let userSessionId = localStorage.getItem('colive_session_id');
+      if (!userSessionId) {
+        userSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        localStorage.setItem('colive_session_id', userSessionId);
+        console.log('🆔 새 세션 ID 생성:', userSessionId);
+      } else {
+        console.log('🆔 기존 세션 ID 복구:', userSessionId);
+      }
+      setSessionId(userSessionId);
     }
   }, []);
   
@@ -192,6 +246,9 @@ export default function Home() {
     console.log('🎯 Home 컴포넌트 마운트 완료');
     
     try {
+      // syncService를 컨트롤러로 설정
+      syncService.setAsController(true);
+      console.log('🎮 syncService 컨트롤러 모드 활성화');
       
       // 음성 인식 서비스 초기화
       webSpeechService.onResult((text: string) => {
@@ -200,8 +257,14 @@ export default function Home() {
         setStatus('번역 중...');
         setIsTranslating(true);
         
-        // 자막 동기화
-        updateSubtitles(text, '', isListening, true);
+        // 중간 번역 타이머 클리어 (최종 결과이므로)
+        if (translationTimer) {
+          clearTimeout(translationTimer);
+          setTranslationTimer(null);
+        }
+        
+        // 번역 중에는 로컬 상태만 업데이트 (API 전송 안함)
+        // updateSubtitles(text, '', isListening, true); // 제거: 중간 상태 전송 방지
         
         // 자동 번역
         freeTranslationService.translate(text, targetLanguage, 'ko')
@@ -211,7 +274,8 @@ export default function Home() {
             setIsTranslating(false);
             setStatus('번역 완료');
             
-            // 번역 완료 동기화
+            // ✅ 번역 완료 후에만 API 전송 (최종 상태만)
+            console.log('📡 최종 번역 결과를 API에 전송:', { text, translated });
             updateSubtitles(text, translated, isListening, false);
           })
           .catch((error) => {
@@ -232,6 +296,17 @@ export default function Home() {
               isListening: isListening
             });
           });
+      });
+
+      // 중간 결과 처리 (실시간 번역)
+      webSpeechService.onInterimResult((text: string) => {
+        console.log('🔄 중간 음성 인식 결과:', text);
+        
+        // 자동 분할 처리
+        handleAutoSegmentation(text);
+        
+        // 중간 번역 처리
+        handleInterimTranslation(text);
       });
 
       webSpeechService.onError((error: string) => {
@@ -295,7 +370,55 @@ export default function Home() {
       }
       console.log('🎯 Home 컴포넌트 언마운트');
     };
-  }, [targetLanguage, sourceLanguage, isListening]);
+  }, [targetLanguage, sourceLanguage, isListening, handleAutoSegmentation, handleInterimTranslation, translationTimer, updateSubtitles]);
+
+  // localStorage 실시간 동기화 (미리보기용)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const STORAGE_KEY = 'subtitle_sync_data';
+    
+    const loadSyncData = () => {
+      try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored) {
+          const data = JSON.parse(stored);
+          console.log('🔄 미리보기 동기화 데이터 수신:', {
+            originalText: data.originalText,
+            translatedText: data.translatedText,
+            isListening: data.isListening
+          });
+          
+          setSyncedOriginalText(data.originalText || '');
+          setSyncedTranslatedText(data.translatedText || '');
+          setSyncedIsListening(data.isListening || false);
+        }
+      } catch (error) {
+        console.error('❌ 미리보기 동기화 데이터 로드 실패:', error);
+      }
+    };
+
+    // 즉시 로드
+    loadSyncData();
+
+    // storage 이벤트 리스너 (다른 탭에서 변경시)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEY) {
+        console.log('🔄 미리보기 storage 이벤트 감지');
+        loadSyncData();
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+
+    // 빠른 폴링으로 같은 탭 내 변경사항도 감지
+    const interval = setInterval(loadSyncData, 100);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      clearInterval(interval);
+    };
+  }, []);
 
 
   const toggleListening = useCallback(() => {
@@ -339,7 +462,6 @@ export default function Home() {
   }, [isListening, sourceLanguage, targetLanguage, originalText, translatedText, updateSubtitles]);
 
   const toggleDarkMode = useCallback(() => {
-    console.log('🌙 다크모드 토글:', !isDarkMode);
     setIsDarkMode(!isDarkMode);
   }, [isDarkMode]);
 
@@ -370,9 +492,11 @@ export default function Home() {
     <ErrorBoundary>
       <div className={`min-h-screen flex flex-col transition-colors duration-300 ${isDarkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
       {/* 헤더 - 고정 */}
-      <SimpleHeader 
+      <Header 
         isDarkMode={isDarkMode}
-        setIsDarkMode={toggleDarkMode}
+        setIsDarkMode={setIsDarkMode}
+        showSubtitlePreview={showSubtitlePreview}
+        setShowSubtitlePreview={setShowSubtitlePreview}
         isListening={isListening}
         toggleListening={toggleListening}
         status={status}
@@ -381,7 +505,7 @@ export default function Home() {
       {/* 메인 레이아웃 - 고정 */}
       <div className="flex flex-1 overflow-hidden">
         {/* 왼쪽 사이드바 - 고정 */}
-        <SimpleSidebar
+        <Sidebar
           isDarkMode={isDarkMode}
           currentSection={currentSection}
           setCurrentSection={setCurrentSection}
@@ -389,14 +513,15 @@ export default function Home() {
 
         {/* 메인 콘텐츠 - 스크롤 가능 */}
         <main className="flex-1 overflow-y-auto">
-          {/* 자막 미리보기 섹션 - 고정 */}
-          <div className={`sticky top-0 z-10 ${isDarkMode ? 'bg-gray-900 border-gray-700' : 'bg-gray-50 border-gray-200'} border-b px-4 py-3`}>
+          {/* 자막 미리보기 섹션 - 조건부 렌더링 */}
+          {showSubtitlePreview && (
+            <div className={`sticky top-0 z-10 ${isDarkMode ? 'bg-gray-900 border-gray-700' : 'bg-gray-50 border-gray-200'} border-b px-4 py-3`}>
             <div className="flex items-center justify-between mb-2">
               <h3 className={`text-base font-bold ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>
                 🎬 자막 미리보기
               </h3>
               <div className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                {isListening ? (
+                {syncedIsListening ? (
                   <span className="text-green-500 font-medium">🔴 녹음 중</span>
                 ) : (
                   <span className="text-gray-500">⏸️ 대기 중</span>
@@ -420,10 +545,10 @@ export default function Home() {
                     borderRadius: `${layoutSettings.borderRadius}px`
                   }}
                 >
-                  {translatedText ? (
+                  {syncedTranslatedText ? (
                     <>
-                      {translatedText}
-                      {showOriginalInOverlay && originalText && originalText !== translatedText && (
+                      {syncedTranslatedText}
+                      {showOriginalInOverlay && syncedOriginalText && syncedOriginalText !== syncedTranslatedText && (
                         <div 
                           className="mt-2 border border-white/20"
                           style={{
@@ -435,13 +560,13 @@ export default function Home() {
                             borderRadius: `${layoutSettings.borderRadius}px`
                           }}
                         >
-                          {originalText}
+                          {syncedOriginalText}
                         </div>
                       )}
                     </>
-                  ) : originalText ? (
-                    originalText
-                  ) : !isListening ? (
+                  ) : syncedOriginalText ? (
+                    syncedOriginalText
+                  ) : !syncedIsListening ? (
                     '안녕하세요! 음성인식을 시작해주세요 🎤'
                   ) : (
                     '음성을 듣고 있습니다...'
@@ -449,7 +574,8 @@ export default function Home() {
                 </div>
               </div>
             </div>
-          </div>
+            </div>
+          )}
 
           {/* 메인 콘텐츠 내용 */}
           <div className="p-4">
@@ -727,6 +853,106 @@ export default function Home() {
                 </div>
               </div>
 
+              {/* 실시간 번역 설정 */}
+              <div className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg p-4 shadow-sm border transition-all duration-300`}>
+                <h3 className={`text-lg font-bold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>⚡ 실시간 번역 설정</h3>
+                <div className="space-y-4">
+                  
+                  {/* 중간 번역 활성화 */}
+                  <div className="flex items-center space-x-3">
+                    <input
+                      type="checkbox"
+                      id="enableInterimTranslation"
+                      checked={realtimeSettings.enableInterimTranslation}
+                      onChange={(e) => setRealtimeSettings(prev => ({
+                        ...prev,
+                        enableInterimTranslation: e.target.checked
+                      }))}
+                      className="rounded focus:ring-[#00B1A9] text-[#00B1A9]"
+                    />
+                    <label htmlFor="enableInterimTranslation" className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                      실시간 중간 번역 활성화 (말하는 도중에도 번역)
+                    </label>
+                  </div>
+                  
+                  {/* 중간 번역 임계값 */}
+                  <div>
+                    <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                      중간 번역 시작 글자 수: {realtimeSettings.interimThreshold}글자
+                    </label>
+                    <input
+                      type="range"
+                      min="5"
+                      max="20"
+                      value={realtimeSettings.interimThreshold}
+                      onChange={(e) => setRealtimeSettings(prev => ({
+                        ...prev,
+                        interimThreshold: parseInt(e.target.value)
+                      }))}
+                      className="w-full accent-[#00B1A9]"
+                    />
+                    <div className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      이 글자 수 이상 말하면 중간 번역을 시작합니다
+                    </div>
+                  </div>
+                  
+                  {/* 자동 분할 길이 */}
+                  <div>
+                    <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                      장문 자동 분할 길이: {realtimeSettings.autoSegmentLength}글자
+                    </label>
+                    <input
+                      type="range"
+                      min="30"
+                      max="100"
+                      value={realtimeSettings.autoSegmentLength}
+                      onChange={(e) => setRealtimeSettings(prev => ({
+                        ...prev,
+                        autoSegmentLength: parseInt(e.target.value)
+                      }))}
+                      className="w-full accent-[#00B1A9]"
+                    />
+                    <div className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      이 글자 수가 넘으면 문장을 자동으로 분할해서 번역합니다
+                    </div>
+                  </div>
+                  
+                  {/* 번역 지연 시간 */}
+                  <div>
+                    <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                      번역 지연 시간: {realtimeSettings.translationDelay}ms
+                    </label>
+                    <input
+                      type="range"
+                      min="500"
+                      max="3000"
+                      step="100"
+                      value={realtimeSettings.translationDelay}
+                      onChange={(e) => setRealtimeSettings(prev => ({
+                        ...prev,
+                        translationDelay: parseInt(e.target.value)
+                      }))}
+                      className="w-full accent-[#00B1A9]"
+                    />
+                    <div className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      말을 멈춘 후 번역을 시작하기까지의 대기 시간입니다
+                    </div>
+                  </div>
+                  
+                  {/* 설명 */}
+                  <div className={`p-3 rounded-lg ${isDarkMode ? 'bg-gray-700' : 'bg-blue-50'}`}>
+                    <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-blue-800'}`}>
+                      <strong>💡 팁:</strong>
+                      <ul className="mt-2 space-y-1 list-disc list-inside">
+                        <li>실시간 번역을 켜면 말하는 도중에도 번역이 나타납니다 (⚡ 표시)</li>
+                        <li>지연 시간을 짧게 하면 더 빠르지만 불완전한 번역이 나올 수 있습니다</li>
+                        <li>장문 자동 분할로 긴 문장을 끊어서 번역할 수 있습니다</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <div className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg p-4 shadow-sm border transition-all duration-300`}>
                 <h3 className={`text-lg font-bold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>🎬 오버레이 표시 설정</h3>
                 <div className="space-y-4">
@@ -782,12 +1008,12 @@ export default function Home() {
                       <div className="flex">
                         <input
                           readOnly
-                          value={currentOrigin ? `${currentOrigin}/overlay?source=${sourceLanguage}&target=${targetLanguage}&controls=false` : '로딩 중...'}
+                          value={currentOrigin && sessionId ? `${currentOrigin}/overlay?sessionId=${sessionId}&source=${sourceLanguage}&target=${targetLanguage}&controls=false` : '로딩 중...'}
                           className={`flex-1 p-2 text-sm rounded-l-lg border ${isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-50 border-gray-300 text-gray-800'}`}
                         />
                         <button
                           onClick={() => copyToClipboard(
-                            `${currentOrigin}/overlay?source=${sourceLanguage}&target=${targetLanguage}&controls=false`,
+                            `${currentOrigin}/overlay?sessionId=${sessionId}&source=${sourceLanguage}&target=${targetLanguage}&controls=false`,
                             '기본 오버레이 URL이 복사되었습니다!'
                           )}
                           className="px-3 py-2 bg-[#00B1A9] text-white text-sm rounded-r-lg hover:bg-[#008F87] transition-colors"
@@ -804,12 +1030,12 @@ export default function Home() {
                       <div className="flex">
                         <input
                           readOnly
-                          value={currentOrigin ? `${currentOrigin}/overlay?source=${sourceLanguage}&target=${targetLanguage}&controls=false&showOriginal=true` : '로딩 중...'}
+                          value={currentOrigin && sessionId ? `${currentOrigin}/overlay?sessionId=${sessionId}&source=${sourceLanguage}&target=${targetLanguage}&controls=false&showOriginal=true` : '로딩 중...'}
                           className={`flex-1 p-2 text-sm rounded-l-lg border ${isDarkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-50 border-gray-300 text-gray-800'}`}
                         />
                         <button
                           onClick={() => copyToClipboard(
-                            `${currentOrigin}/overlay?source=${sourceLanguage}&target=${targetLanguage}&controls=false&showOriginal=true`,
+                            `${currentOrigin}/overlay?sessionId=${sessionId}&source=${sourceLanguage}&target=${targetLanguage}&controls=false&showOriginal=true`,
                             '원본 포함 오버레이 URL이 복사되었습니다!'
                           )}
                           className="px-3 py-2 bg-[#00B1A9] text-white text-sm rounded-r-lg hover:bg-[#008F87] transition-colors"
