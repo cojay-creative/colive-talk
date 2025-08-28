@@ -9,6 +9,7 @@ interface SidebarProps {
 const menuItems = [
   { id: 'control', label: '음성 인식 컨트롤', icon: '🎤' },
   { id: 'settings', label: '언어 설정', icon: '🌍' },
+  { id: 'realtime', label: '실시간 설정', icon: '⚡' },
   { id: 'layout', label: '레이아웃 설정', icon: '⚙️' },
   { id: 'font', label: '폰트 설정', icon: '✍️' },
   { id: 'background', label: '배경 설정', icon: '🎨' },

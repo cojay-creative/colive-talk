@@ -48,7 +48,12 @@ export default function Home() {
     interimThreshold: 8,                // 중간 번역 시작 글자 수
     autoSegmentLength: 50,              // 자동 분할 길이 (글자 수)
     translationDelay: 1000,             // 번역 지연 시간 (ms)
+    autoDissolveTime: 5,                // 자동 디졸브 시간 (초)
+    enableAutoDissolve: true,           // 자동 디졸브 활성화
   });
+
+  // 자동 디졸브 타이머
+  const [dissolveTimer, setDissolveTimer] = useState<NodeJS.Timeout | null>(null);
   
   // 레이아웃 설정 상태
   const [layoutSettings, setLayoutSettings] = useState({
@@ -62,9 +67,74 @@ export default function Home() {
     textAlign: 'center' as const
   });
   
+  // 자동 디졸브 타이머 관리
+  const resetDissolveTimer = useCallback(() => {
+    if (dissolveTimer) {
+      clearTimeout(dissolveTimer);
+      setDissolveTimer(null);
+    }
+
+    // 자동 디졸브가 활성화되어 있고, 텍스트가 있는 경우에만 타이머 설정
+    if (realtimeSettings.enableAutoDissolve && realtimeSettings.autoDissolveTime > 0) {
+      const timer = setTimeout(async () => {
+        console.log(`⏰ ${realtimeSettings.autoDissolveTime}초 후 자동 디졸브 실행`);
+        
+        // 디졸브 시 빈 텍스트로 업데이트 (안내 메시지가 표시됨)
+        setSyncedOriginalText('');
+        setSyncedTranslatedText('');
+        setOriginalText('');
+        setTranslatedText('');
+        
+        // API로도 전송하여 OBS 동기화
+        if (sessionId) {
+          try {
+            await fetch('/api/subtitle-status', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                sessionId,
+                originalText: '',
+                translatedText: '',
+                isListening: false,
+                isTranslating: false
+              })
+            });
+            console.log('✅ 디졸브 API 전송 완료');
+          } catch (error) {
+            console.error('❌ 디졸브 API 전송 실패:', error);
+          }
+        }
+      }, realtimeSettings.autoDissolveTime * 1000);
+
+      setDissolveTimer(timer);
+    }
+  }, [dissolveTimer, realtimeSettings.enableAutoDissolve, realtimeSettings.autoDissolveTime, sessionId]);
+
   // API 기반 동기화 함수
   const updateSubtitles = useCallback(async (originalText: string, translatedText: string, isListening: boolean, isTranslating: boolean) => {
     console.log('🔄 자막 업데이트:', { originalText, translatedText, isListening, isTranslating });
+    
+    // 음성인식이 중지되면 즉시 텍스트 클리어
+    if (!isListening) {
+      console.log('🛑 음성인식 중지 - 즉시 텍스트 클리어');
+      originalText = '';
+      translatedText = '';
+      
+      // 로컬 상태도 즉시 클리어
+      setOriginalText('');
+      setTranslatedText('');
+      setSyncedOriginalText('');
+      setSyncedTranslatedText('');
+      
+      // 디졸브 타이머도 클리어
+      if (dissolveTimer) {
+        clearTimeout(dissolveTimer);
+        setDissolveTimer(null);
+      }
+    } else if (originalText || translatedText) {
+      // 새로운 텍스트가 있을 때만 디졸브 타이머 리셋
+      resetDissolveTimer();
+    }
     
     const updateData = {
       originalText,
@@ -241,6 +311,17 @@ export default function Home() {
     }
   }, []);
   
+  // 컴포넌트 정리 시 타이머 해제
+  useEffect(() => {
+    return () => {
+      if (dissolveTimer) {
+        clearTimeout(dissolveTimer);
+      }
+      if (translationTimer) {
+        clearTimeout(translationTimer);
+      }
+    };
+  }, [dissolveTimer, translationTimer]);
 
   useEffect(() => {
     console.log('🎯 Home 컴포넌트 마운트 완료');
@@ -711,6 +792,171 @@ export default function Home() {
             </div>
           )}
 
+          {currentSection === 'realtime' && (
+            <div className="space-y-6">
+              <h1 className={`text-3xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>실시간 설정</h1>
+              
+              {/* 실시간 번역 설정 */}
+              <div className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg p-4 shadow-sm border transition-all duration-300`}>
+                <h3 className={`text-lg font-bold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>⚡ 실시간 번역 설정</h3>
+                <div className="space-y-4">
+                  
+                  {/* 중간 번역 활성화 */}
+                  <div className="flex items-center space-x-3">
+                    <input
+                      type="checkbox"
+                      id="enableInterimTranslation"
+                      checked={realtimeSettings.enableInterimTranslation}
+                      onChange={(e) => setRealtimeSettings(prev => ({
+                        ...prev,
+                        enableInterimTranslation: e.target.checked
+                      }))}
+                      className="rounded focus:ring-[#00B1A9] text-[#00B1A9]"
+                    />
+                    <label htmlFor="enableInterimTranslation" className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                      실시간 중간 번역 활성화 (말하는 도중에도 번역)
+                    </label>
+                  </div>
+                  
+                  {/* 중간 번역 임계값 */}
+                  <div>
+                    <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                      중간 번역 시작 글자 수: {realtimeSettings.interimThreshold}글자
+                    </label>
+                    <input
+                      type="range"
+                      min="5"
+                      max="20"
+                      value={realtimeSettings.interimThreshold}
+                      onChange={(e) => setRealtimeSettings(prev => ({
+                        ...prev,
+                        interimThreshold: parseInt(e.target.value)
+                      }))}
+                      className="w-full accent-[#00B1A9]"
+                    />
+                    <div className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      이 글자 수 이상 말하면 중간 번역을 시작합니다
+                    </div>
+                  </div>
+                  
+                  {/* 자동 분할 길이 */}
+                  <div>
+                    <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                      장문 자동 분할 길이: {realtimeSettings.autoSegmentLength}글자
+                    </label>
+                    <input
+                      type="range"
+                      min="30"
+                      max="100"
+                      value={realtimeSettings.autoSegmentLength}
+                      onChange={(e) => setRealtimeSettings(prev => ({
+                        ...prev,
+                        autoSegmentLength: parseInt(e.target.value)
+                      }))}
+                      className="w-full accent-[#00B1A9]"
+                    />
+                    <div className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      이 글자 수가 넘으면 문장을 자동으로 분할해서 번역합니다
+                    </div>
+                  </div>
+                  
+                  {/* 번역 지연 시간 */}
+                  <div>
+                    <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                      번역 지연 시간: {realtimeSettings.translationDelay}ms
+                    </label>
+                    <input
+                      type="range"
+                      min="500"
+                      max="3000"
+                      step="100"
+                      value={realtimeSettings.translationDelay}
+                      onChange={(e) => setRealtimeSettings(prev => ({
+                        ...prev,
+                        translationDelay: parseInt(e.target.value)
+                      }))}
+                      className="w-full accent-[#00B1A9]"
+                    />
+                    <div className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      말을 멈춘 후 번역을 시작하기까지의 대기 시간입니다
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 자동 디졸브 설정 */}
+              <div className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg p-4 shadow-sm border transition-all duration-300`}>
+                <h3 className={`text-lg font-bold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>⏰ 자동 디졸브 설정</h3>
+                <div className="space-y-4">
+                  
+                  {/* 자동 디졸브 활성화 */}
+                  <div className="flex items-center space-x-3">
+                    <input
+                      type="checkbox"
+                      id="enableAutoDissolve"
+                      checked={realtimeSettings.enableAutoDissolve}
+                      onChange={(e) => setRealtimeSettings(prev => ({
+                        ...prev,
+                        enableAutoDissolve: e.target.checked
+                      }))}
+                      className="rounded focus:ring-[#00B1A9] text-[#00B1A9]"
+                    />
+                    <label htmlFor="enableAutoDissolve" className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                      자동 디졸브 활성화 (일정 시간 후 자막 사라짐)
+                    </label>
+                  </div>
+                  
+                  {/* 디졸브 시간 설정 */}
+                  <div className={realtimeSettings.enableAutoDissolve ? '' : 'opacity-50 pointer-events-none'}>
+                    <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                      자동 디졸브 시간: {realtimeSettings.autoDissolveTime}초
+                    </label>
+                    <input
+                      type="range"
+                      min="2"
+                      max="30"
+                      value={realtimeSettings.autoDissolveTime}
+                      onChange={(e) => setRealtimeSettings(prev => ({
+                        ...prev,
+                        autoDissolveTime: parseInt(e.target.value)
+                      }))}
+                      className="w-full accent-[#00B1A9]"
+                      disabled={!realtimeSettings.enableAutoDissolve}
+                    />
+                    <div className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      음성이 입력되지 않은 후 이 시간이 지나면 자막이 사라집니다
+                    </div>
+                  </div>
+                  
+                  {/* 설명 */}
+                  <div className={`p-3 rounded-lg ${isDarkMode ? 'bg-gray-700' : 'bg-blue-50'}`}>
+                    <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-blue-800'}`}>
+                      <strong>💡 디졸브 기능 설명:</strong>
+                      <ul className="mt-2 space-y-1 list-disc list-inside">
+                        <li>음성 입력이 없으면 설정한 시간 후에 자막이 자동으로 사라집니다</li>
+                        <li>음성 인식을 중지하면 즉시 관리자가 설정한 안내 메시지가 표시됩니다</li>
+                        <li>새로운 음성이 입력되면 타이머가 다시 시작됩니다</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 종합 설명 */}
+              <div className={`p-3 rounded-lg ${isDarkMode ? 'bg-gray-700' : 'bg-green-50'}`}>
+                <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-green-800'}`}>
+                  <strong>⚡ 실시간 설정 활용 팁:</strong>
+                  <ul className="mt-2 space-y-1 list-disc list-inside">
+                    <li>실시간 번역을 켜면 말하는 도중에도 번역이 나타납니다</li>
+                    <li>지연 시간을 짧게 하면 더 빠르지만 불완전한 번역이 나올 수 있습니다</li>
+                    <li>장문 자동 분할로 긴 문장을 끊어서 번역할 수 있습니다</li>
+                    <li>자동 디졸브로 깔끔한 스트리밍을 위해 오래된 자막을 자동 제거할 수 있습니다</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+
             {currentSection === 'layout' && (
             <div className="space-y-6">
               <h1 className={`text-3xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>레이아웃 설정</h1>
@@ -853,105 +1099,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* 실시간 번역 설정 */}
-              <div className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg p-4 shadow-sm border transition-all duration-300`}>
-                <h3 className={`text-lg font-bold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>⚡ 실시간 번역 설정</h3>
-                <div className="space-y-4">
-                  
-                  {/* 중간 번역 활성화 */}
-                  <div className="flex items-center space-x-3">
-                    <input
-                      type="checkbox"
-                      id="enableInterimTranslation"
-                      checked={realtimeSettings.enableInterimTranslation}
-                      onChange={(e) => setRealtimeSettings(prev => ({
-                        ...prev,
-                        enableInterimTranslation: e.target.checked
-                      }))}
-                      className="rounded focus:ring-[#00B1A9] text-[#00B1A9]"
-                    />
-                    <label htmlFor="enableInterimTranslation" className={`font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-                      실시간 중간 번역 활성화 (말하는 도중에도 번역)
-                    </label>
-                  </div>
-                  
-                  {/* 중간 번역 임계값 */}
-                  <div>
-                    <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-                      중간 번역 시작 글자 수: {realtimeSettings.interimThreshold}글자
-                    </label>
-                    <input
-                      type="range"
-                      min="5"
-                      max="20"
-                      value={realtimeSettings.interimThreshold}
-                      onChange={(e) => setRealtimeSettings(prev => ({
-                        ...prev,
-                        interimThreshold: parseInt(e.target.value)
-                      }))}
-                      className="w-full accent-[#00B1A9]"
-                    />
-                    <div className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                      이 글자 수 이상 말하면 중간 번역을 시작합니다
-                    </div>
-                  </div>
-                  
-                  {/* 자동 분할 길이 */}
-                  <div>
-                    <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-                      장문 자동 분할 길이: {realtimeSettings.autoSegmentLength}글자
-                    </label>
-                    <input
-                      type="range"
-                      min="30"
-                      max="100"
-                      value={realtimeSettings.autoSegmentLength}
-                      onChange={(e) => setRealtimeSettings(prev => ({
-                        ...prev,
-                        autoSegmentLength: parseInt(e.target.value)
-                      }))}
-                      className="w-full accent-[#00B1A9]"
-                    />
-                    <div className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                      이 글자 수가 넘으면 문장을 자동으로 분할해서 번역합니다
-                    </div>
-                  </div>
-                  
-                  {/* 번역 지연 시간 */}
-                  <div>
-                    <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-                      번역 지연 시간: {realtimeSettings.translationDelay}ms
-                    </label>
-                    <input
-                      type="range"
-                      min="500"
-                      max="3000"
-                      step="100"
-                      value={realtimeSettings.translationDelay}
-                      onChange={(e) => setRealtimeSettings(prev => ({
-                        ...prev,
-                        translationDelay: parseInt(e.target.value)
-                      }))}
-                      className="w-full accent-[#00B1A9]"
-                    />
-                    <div className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                      말을 멈춘 후 번역을 시작하기까지의 대기 시간입니다
-                    </div>
-                  </div>
-                  
-                  {/* 설명 */}
-                  <div className={`p-3 rounded-lg ${isDarkMode ? 'bg-gray-700' : 'bg-blue-50'}`}>
-                    <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-blue-800'}`}>
-                      <strong>💡 팁:</strong>
-                      <ul className="mt-2 space-y-1 list-disc list-inside">
-                        <li>실시간 번역을 켜면 말하는 도중에도 번역이 나타납니다 (⚡ 표시)</li>
-                        <li>지연 시간을 짧게 하면 더 빠르지만 불완전한 번역이 나올 수 있습니다</li>
-                        <li>장문 자동 분할로 긴 문장을 끊어서 번역할 수 있습니다</li>
-                      </ul>
-                    </div>
-                  </div>
-                </div>
-              </div>
 
               <div className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg p-4 shadow-sm border transition-all duration-300`}>
                 <h3 className={`text-lg font-bold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>🎬 오버레이 표시 설정</h3>
