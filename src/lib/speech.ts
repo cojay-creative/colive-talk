@@ -162,23 +162,45 @@ export class WebSpeechService {
       return;
     }
     
+    // 페이지 가시성 변화 감지
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
-        console.log('페이지가 백그라운드로 이동');
+        console.log('🔄 페이지가 백그라운드로 이동 - 음성인식 유지 시도');
+        // 백그라운드에서도 계속 동작하도록 활동 시간 업데이트
+        this.lastActivity = Date.now();
       } else {
-        console.log('페이지가 포그라운드로 복귀');
+        console.log('🔄 페이지가 포그라운드로 복귀');
         this.lastActivity = Date.now();
         
-        // 페이지 복귀 시 음성 인식이 중단된 경우 재시작
-        if (this.shouldRestart && !this.isListening) {
-          console.log('페이지 복귀 시 음성 인식 재시작');
-          this.scheduleRestart();
-        }
+        // 페이지 복귀 시 음성 인식 상태 확인 및 재시작
+        setTimeout(() => {
+          if (this.shouldRestart && !this.isListening) {
+            console.log('🔄 페이지 복귀 후 음성 인식 재시작');
+            this.restartAttempts = 0; // 시도 횟수 초기화
+            this.scheduleRestart();
+          }
+        }, 1000); // 1초 후 재시작 (브라우저 안정화 대기)
       }
+    });
+
+    // 포커스 이벤트도 감지
+    window.addEventListener('focus', () => {
+      console.log('🔄 윈도우 포커스 복귀');
+      this.lastActivity = Date.now();
+      if (this.shouldRestart && !this.isListening) {
+        console.log('🔄 윈도우 포커스 복귀 후 음성 인식 재시작');
+        this.restartAttempts = 0;
+        this.scheduleRestart();
+      }
+    });
+
+    window.addEventListener('blur', () => {
+      console.log('🔄 윈도우 포커스 상실');
+      this.lastActivity = Date.now(); // 포커스 상실시에도 활동으로 간주
     });
   }
 
-  // 하트비트 시작 (무활동 감지)
+  // 하트비트 시작 (무활동 감지 및 자동 재시작)
   private startHeartbeat() {
     if (typeof window === 'undefined') {
       return;
@@ -188,12 +210,18 @@ export class WebSpeechService {
       const now = Date.now();
       const timeSinceActivity = now - this.lastActivity;
       
-      // 60초 이상 무활동 시 재시작 (브라우저가 음성 인식을 자동 중단했을 가능성)
-      if (this.shouldRestart && this.isListening && timeSinceActivity > 60000) {
-        console.log('무활동 감지, 음성 인식 재시작');
+      // 음성인식이 켜져있어야 하는데 실제로는 꺼져있는 경우 재시작
+      if (this.shouldRestart && !this.isListening) {
+        console.log('🔄 하트비트: 음성인식 비활성 상태 감지 - 재시작 시도');
+        this.restartAttempts = 0; // 시도 횟수 초기화
+        this.scheduleRestart();
+      }
+      // 30초 이상 무활동 시 재시작 (더 빠른 감지)
+      else if (this.shouldRestart && this.isListening && timeSinceActivity > 30000) {
+        console.log('🔄 하트비트: 30초 무활동 감지 - 음성 인식 재시작');
         this.restart();
       }
-    }, 30000); // 30초마다 체크
+    }, 10000); // 10초마다 체크 (더 자주 확인)
   }
 
   // 재시작

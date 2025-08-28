@@ -68,14 +68,25 @@ export default function Home() {
   });
   
   // 자동 디졸브 타이머 관리
-  const resetDissolveTimer = useCallback(() => {
+  const resetDissolveTimer = useCallback((hasText: boolean = false, listening: boolean = false) => {
+    // 기존 타이머 클리어
     if (dissolveTimer) {
       clearTimeout(dissolveTimer);
       setDissolveTimer(null);
     }
 
-    // 자동 디졸브가 활성화되어 있고, 텍스트가 있는 경우에만 타이머 설정
-    if (realtimeSettings.enableAutoDissolve && realtimeSettings.autoDissolveTime > 0) {
+    // 자동 디졸브 조건 확인:
+    // 1. 자동 디졸브가 활성화되어 있고
+    // 2. 디졸브 시간이 설정되어 있고
+    // 3. 음성인식이 활성화된 상태이고
+    // 4. 표시할 텍스트가 있는 경우에만 타이머 설정
+    if (realtimeSettings.enableAutoDissolve && 
+        realtimeSettings.autoDissolveTime > 0 && 
+        listening && 
+        hasText) {
+      
+      console.log(`⏰ ${realtimeSettings.autoDissolveTime}초 후 디졸브 타이머 시작`);
+      
       const timer = setTimeout(async () => {
         console.log(`⏰ ${realtimeSettings.autoDissolveTime}초 후 자동 디졸브 실행`);
         
@@ -85,7 +96,7 @@ export default function Home() {
         setOriginalText('');
         setTranslatedText('');
         
-        // API로도 전송하여 OBS 동기화
+        // API로도 전송하여 OBS 동기화 (음성인식은 계속 활성 상태로 유지)
         if (sessionId) {
           try {
             await fetch('/api/subtitle-status', {
@@ -95,11 +106,11 @@ export default function Home() {
                 sessionId,
                 originalText: '',
                 translatedText: '',
-                isListening: false,
+                isListening: true, // 음성인식은 계속 활성 상태
                 isTranslating: false
               })
             });
-            console.log('✅ 디졸브 API 전송 완료');
+            console.log('✅ 디졸브 API 전송 완료 (음성인식 유지)');
           } catch (error) {
             console.error('❌ 디졸브 API 전송 실패:', error);
           }
@@ -131,9 +142,10 @@ export default function Home() {
         clearTimeout(dissolveTimer);
         setDissolveTimer(null);
       }
-    } else if (originalText || translatedText) {
-      // 새로운 텍스트가 있을 때만 디졸브 타이머 리셋
-      resetDissolveTimer();
+    } else {
+      // 음성인식이 활성화된 상태에서 텍스트가 있으면 디졸브 타이머 시작
+      const hasText = !!(originalText || translatedText);
+      resetDissolveTimer(hasText, isListening);
     }
     
     const updateData = {
