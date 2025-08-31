@@ -44,7 +44,7 @@ export class KeepAliveService {
     // 15초마다 더미 작업 수행하여 탭 활성 상태 유지
     this.intervalId = setInterval(() => {
       // 더미 계산 (브라우저가 탭을 비활성화하지 않도록)
-      const dummy = Math.random() * Date.now();
+      Math.random() * Date.now();
       
       // 웹 워커가 있다면 메시지 전송 (선택사항)
       if (typeof Worker !== 'undefined') {

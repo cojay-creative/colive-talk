@@ -12,10 +12,10 @@ export class FreeTranslationService {
   private readonly CACHE_SIZE = 100;
   private readonly CACHE_EXPIRE_TIME = 30 * 1000; // 30초 후 캐시 만료
   private lastApiCall = 0;
-  private readonly MIN_API_INTERVAL = 50; // 초창기 스타일: 더 빠른 응답
+  private readonly MIN_API_INTERVAL = 20; // 초고속 응답: 20ms
   
   // 간단한 폴백 번역 (키워드 기반)
-  private fallbackTranslations: { [key: string]: { [key: string]: string } } = {
+  private fallbackTranslations: { [key: string]: { [key: string]: { [key: string]: string } } } = {
     'ko': {
       'en': {
         '안녕하세요': 'Hello',
@@ -78,7 +78,7 @@ export class FreeTranslationService {
     
     // 캐시 크기 제한
     if (this.cache.size >= this.CACHE_SIZE) {
-      const firstKey = this.cache.keys().next().value;
+      const firstKey = this.cache.keys().next().value as string;
       this.cache.delete(firstKey);
     }
     
@@ -197,7 +197,7 @@ export class FreeTranslationService {
         console.log(`❌ LibreTranslate HTTP 오류 (${url}): ${response.status} ${response.statusText}`);
       }
     } catch (error) {
-      if (error.name === 'AbortError') {
+      if ((error as Error).name === 'AbortError') {
         console.warn(`⏰ LibreTranslate 타임아웃 (${url})`);
       } else {
         console.warn(`❌ LibreTranslate 오류 (${url}):`, error);
@@ -218,13 +218,13 @@ export class FreeTranslationService {
     // 정확히 일치하는 키워드 찾기
     if (fallbackDict[cleanText]) {
       console.log(`🔄 폴백 번역 성공: "${cleanText}" → "${fallbackDict[cleanText]}"`);
-      return fallbackDict[cleanText];
+      return fallbackDict[cleanText] as string;
     }
     
     // 부분 일치 찾기
     for (const [korean, english] of Object.entries(fallbackDict)) {
       if (cleanText.includes(korean)) {
-        const result = cleanText.replace(korean, english);
+        const result = cleanText.replace(korean, english as string);
         console.log(`🔄 폴백 부분 번역: "${cleanText}" → "${result}"`);
         return result;
       }
@@ -254,21 +254,35 @@ export class FreeTranslationService {
       return cached;
     }
 
-    console.log(`🚀 번역 시작: "${text.substring(0, 50)}..." (${sourceLang} → ${targetLang})`);
+    console.log(`⚡ 초고속 번역 시작: "${text.substring(0, 30)}..." (${sourceLang} → ${targetLang})`);
     const startTime = Date.now();
 
     try {
-      // 가장 빠른 MyMemory를 먼저 시도
-      console.log('🔄 MyMemory API 시도 중...');
-      const myMemoryResult = await this.translateWithMyMemory(text, sourceLang, targetLang);
+      // 폴백 번역을 먼저 확인 (가장 빠름)
+      const fallbackResult = this.tryFallbackTranslation(text, sourceLang, targetLang);
+      if (fallbackResult) {
+        console.log(`⚡ 폴백 번역 즉시 반환 (0ms): ${fallbackResult}`);
+        return fallbackResult;
+      }
+
+      // MyMemory API 시도 (타임아웃 단축)
+      console.log('🔄 MyMemory API 초고속 시도...');
+      const myMemoryResult = await Promise.race([
+        this.translateWithMyMemory(text, sourceLang, targetLang),
+        new Promise<null>((_, reject) => setTimeout(() => reject(new Error('MyMemory timeout')), 1500)) // 1.5초 타임아웃
+      ]);
+      
       if (myMemoryResult && myMemoryResult !== text) {
         const elapsed = Date.now() - startTime;
-        console.log(`✅ MyMemory 번역 성공 (${elapsed}ms): ${myMemoryResult}`);
+        console.log(`⚡ MyMemory 번역 성공 (${elapsed}ms): ${myMemoryResult}`);
         this.saveToCache(text, sourceLang, targetLang, myMemoryResult);
         return myMemoryResult;
-      } else {
-        console.log('❌ MyMemory 번역 실패 또는 동일한 텍스트 반환:', myMemoryResult);
       }
+    } catch (error) {
+      console.log('⚡ MyMemory 초고속 시도 실패, LibreTranslate로 진행');
+    }
+
+    try {
 
       // MyMemory 실패 시 LibreTranslate 서비스들을 병렬 시도
       console.log('🔄 LibreTranslate 서비스들 시도 중...');

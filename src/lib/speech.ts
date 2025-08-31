@@ -1,6 +1,6 @@
 // Web Speech API를 사용한 무료 음성 인식 서비스 (개선된 안정성)
 export class WebSpeechService {
-  private recognition: SpeechRecognition | null = null;
+  private recognition: any | null = null;
   private isListening = false;
   private shouldRestart = false;
   private currentLanguage = 'ko-KR';
@@ -12,7 +12,7 @@ export class WebSpeechService {
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private lastActivity = Date.now();
   private restartAttempts = 0;
-  private maxRestartAttempts = 5;
+  private maxRestartAttempts = 10; // 재시도 횟수 증가 (5 → 10)
   // MVP: 마이크 관련 복잡한 기능 제거
 
   constructor() {
@@ -54,7 +54,7 @@ export class WebSpeechService {
     this.recognition.maxAlternatives = 1;     // 최대 대안 수 제한
 
     // 이벤트 핸들러 설정
-    this.recognition.onresult = (event: SpeechRecognitionEvent) => {
+    this.recognition.onresult = (event: any) => {
       let finalTranscript = '';
       let interimTranscript = '';
 
@@ -72,32 +72,72 @@ export class WebSpeechService {
         this.onResultCallback(finalTranscript);
       }
 
-      // 중간 결과가 있고 충분히 길면 중간 콜백 호출 (실시간 번역용)
-      if (interimTranscript && interimTranscript.trim().length > 8 && this.onInterimResultCallback) {
+      // 중간 결과를 더 적극적으로 처리 (3글자부터 즉시 번역)
+      if (interimTranscript && interimTranscript.trim().length > 2 && this.onInterimResultCallback) {
         // 노이즈 필터링: 특수 기호나 반복 단어 제거
         const filteredTranscript = this.filterNoise(interimTranscript.trim());
         if (filteredTranscript) {
+          // 활동 시간 업데이트 (더 자주)
+          this.lastActivity = Date.now();
           this.onInterimResultCallback(filteredTranscript);
         }
       }
     };
 
-    this.recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      console.error('Speech recognition error:', event.error);
-      if (this.onErrorCallback) {
-        this.onErrorCallback(event.error);
+    this.recognition.onerror = (event: any) => {
+      console.error('🚨 Speech recognition error:', event.error, 'Type:', event.type);
+      
+      // 네트워크 오류 및 복구 가능한 오류들에 대한 특별 처리
+      const recoverableErrors = ['network', 'audio-capture', 'aborted', 'no-speech', 'service-not-allowed'];
+      const isRecoverableError = recoverableErrors.includes(event.error);
+      
+      if (isRecoverableError && this.shouldRestart) {
+        console.log(`🔄 복구 가능한 오류 감지: ${event.error} - 자동 재시작 시도`);
+        
+        // 상태를 listening으로 유지 (UI에서 중단된 것처럼 보이지 않게)
+        this.isListening = true;
+        
+        // 상태 알림
+        this.notifyStatus(`네트워크 오류 - 재연결 중... (${event.error})`);
+        
+        // 즉시 재시작 시도
+        setTimeout(() => {
+          if (this.shouldRestart) {
+            console.log('🔄 오류 후 즉시 재시작 시도');
+            this.forceStart();
+          }
+        }, 1000); // 1초 후 재시작
+        
+      } else {
+        // 복구 불가능한 오류는 사용자에게 알림
+        console.error('❌ 복구 불가능한 오류:', event.error);
+        if (this.onErrorCallback) {
+          this.onErrorCallback(`음성 인식 오류: ${event.error}`);
+        }
       }
     };
 
     this.recognition.onend = () => {
-      console.log('음성 인식 종료됨');
-      this.isListening = false;
+      console.log('🔚 음성 인식 종료됨');
       
-      // 자동 재시작이 필요한 경우
+      // 자동 재시작이 필요한 경우 (사용자가 중지하지 않았다면)
       if (this.shouldRestart) {
-        this.notifyStatus('재연결 중...');
-        this.scheduleRestart();
+        console.log('🔄 예상치 못한 종료 - 자동 재시작 예약');
+        
+        // isListening을 false로 설정하지 않음 (UI 상태 유지)
+        this.notifyStatus('연결 끊김 - 재연결 중...');
+        
+        // 더 빠른 재시작
+        setTimeout(() => {
+          if (this.shouldRestart) {
+            console.log('🔄 종료 후 자동 재시작');
+            this.forceStart();
+          }
+        }, 500); // 0.5초 후 재시작
+        
       } else {
+        // 사용자가 의도적으로 중지한 경우만 isListening을 false로 설정
+        this.isListening = false;
         this.notifyStatus('음성 인식 중지됨');
       }
     };
@@ -121,42 +161,87 @@ export class WebSpeechService {
     };
   }
 
-  // 자동 재시작 스케줄링
+  // 자동 재시작 스케줄링 (강화된 복구 로직)
   private scheduleRestart() {
     if (this.restartTimeout) {
       clearTimeout(this.restartTimeout);
     }
 
-    const delay = Math.min(1000 * Math.pow(2, this.restartAttempts), 10000); // 지수 백오프, 최대 10초
-    console.log(`${delay}ms 후 재시작 시도 (${this.restartAttempts + 1}/${this.maxRestartAttempts})`);
+    // 더 적극적인 재시도 (더 짧은 지연, 더 많은 시도)
+    const delay = Math.min(500 * Math.pow(1.5, this.restartAttempts), 5000); // 0.5초부터 최대 5초
+    console.log(`⏱️ ${delay}ms 후 재시작 시도 (${this.restartAttempts + 1}/${this.maxRestartAttempts})`);
 
     this.restartTimeout = setTimeout(() => {
       if (this.shouldRestart && this.restartAttempts < this.maxRestartAttempts) {
         this.restartAttempts++;
-        this.forceStart();
+        
+        // 네트워크 상태 확인 후 재시작
+        if (navigator.onLine) {
+          console.log('🌐 네트워크 연결 확인됨 - 재시작 시도');
+          this.forceStart();
+        } else {
+          console.log('🚫 네트워크 연결 없음 - 연결 대기 중');
+          this.notifyStatus('네트워크 연결 대기 중...');
+          this.scheduleRestart(); // 다시 스케줄링
+        }
       } else if (this.restartAttempts >= this.maxRestartAttempts) {
-        this.notifyStatus('재연결 실패 - 수동으로 다시 시작해주세요');
-        this.notifyError('최대 재시도 횟수 초과');
+        console.log('❌ 최대 재시도 횟수 초과');
+        this.isListening = false; // 최종 실패시에만 false로 설정
+        this.notifyStatus('연결 실패 - 음성 인식을 다시 시작해주세요');
+        this.notifyError('네트워크 문제로 음성 인식을 계속할 수 없습니다. 다시 시작해주세요.');
       }
     }, delay);
   }
 
-  // 강제 시작 (내부용)
+  // 강제 시작 (내부용) - 개선된 오류 처리
   private forceStart() {
-    if (!this.recognition || !this.shouldRestart) return;
+    if (!this.recognition || !this.shouldRestart) {
+      console.log('🚫 강제 시작 조건 불만족');
+      return;
+    }
 
     try {
-      this.recognition.lang = this.currentLanguage;
-      this.recognition.start();
+      console.log('🔄 음성 인식 강제 시작 시도...');
+      
+      // 기존 인식이 활성화되어 있다면 중지
+      if (this.isListening) {
+        try {
+          this.recognition.stop();
+        } catch (e) {
+          console.log('기존 인식 중지 중 오류 (무시):', e);
+        }
+        // 잠시 대기 후 시작
+        setTimeout(() => {
+          if (this.shouldRestart) {
+            this.startRecognition();
+          }
+        }, 100);
+      } else {
+        this.startRecognition();
+      }
+      
     } catch (error) {
-      console.warn('재시작 실패:', error);
+      console.warn('❌ 강제 재시작 실패:', error);
       if (this.shouldRestart) {
+        console.log('🔄 재시작 실패로 인한 스케줄링');
         this.scheduleRestart();
       }
     }
   }
+  
+  // 실제 인식 시작 로직 분리
+  private startRecognition() {
+    try {
+      this.recognition.lang = this.currentLanguage;
+      this.recognition.start();
+      console.log('✅ 음성 인식 시작 명령 전송');
+    } catch (error) {
+      console.error('❌ 음성 인식 시작 실패:', error);
+      throw error;
+    }
+  }
 
-  // 페이지 가시성 변경 처리
+  // 페이지 가시성 변경 처리 (백그라운드 지속 동작 강화)
   private setupPageVisibilityHandler() {
     if (typeof window === 'undefined' || typeof document === 'undefined') {
       return;
@@ -165,21 +250,63 @@ export class WebSpeechService {
     // 페이지 가시성 변화 감지
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
-        console.log('🔄 페이지가 백그라운드로 이동 - 음성인식 유지 시도');
-        // 백그라운드에서도 계속 동작하도록 활동 시간 업데이트
+        console.log('🔄 페이지가 백그라운드로 이동 - 음성인식 강제 유지');
         this.lastActivity = Date.now();
+        
+        // 백그라운드 진입 시 즉시 재시작 시도 (브라우저가 멈추기 전에)
+        if (this.shouldRestart && this.isListening) {
+          console.log('🔄 백그라운드 진입 - 예방적 재시작');
+          setTimeout(() => {
+            if (document.hidden && this.shouldRestart && !this.isListening) {
+              console.log('🔄 백그라운드에서 음성인식 중단됨 - 재시작 시도');
+              this.forceStart();
+            }
+          }, 1000); // 1초 후 상태 체크 및 재시작
+        }
       } else {
         console.log('🔄 페이지가 포그라운드로 복귀');
         this.lastActivity = Date.now();
         
-        // 페이지 복귀 시 음성 인식 상태 확인 및 재시작
+        // 페이지 복귀 시 음성 인식 상태 확인 및 즉시 재시작
         setTimeout(() => {
           if (this.shouldRestart && !this.isListening) {
-            console.log('🔄 페이지 복귀 후 음성 인식 재시작');
-            this.restartAttempts = 0; // 시도 횟수 초기화
-            this.scheduleRestart();
+            console.log('🔄 페이지 복귀 후 즉시 음성 인식 재시작');
+            this.restartAttempts = 0;
+            this.forceStart();
           }
-        }, 1000); // 1초 후 재시작 (브라우저 안정화 대기)
+        }, 100); // 100ms 후 재시작 (페이지 안정화 대기)
+      }
+    });
+  }
+  
+  // 네트워크 연결 모니터링 추가
+  private setupNetworkMonitoring() {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    
+    // 네트워크 연결 복구 시 자동 재시작
+    window.addEventListener('online', () => {
+      console.log('🌐 네트워크 연결 복구됨');
+      
+      if (this.shouldRestart && !this.isListening) {
+        console.log('🔄 네트워크 복구 후 음성 인식 재시작');
+        this.restartAttempts = 0; // 시도 횟수 초기화
+        
+        setTimeout(() => {
+          if (this.shouldRestart && !this.isListening) {
+            this.forceStart();
+          }
+        }, 1000); // 1초 대기 후 재시작
+      }
+    });
+    
+    // 네트워크 연결 끊김 감지
+    window.addEventListener('offline', () => {
+      console.log('🚫 네트워크 연결 끊김');
+      
+      if (this.shouldRestart && this.isListening) {
+        this.notifyStatus('네트워크 연결 끊김 - 연결 대기 중...');
       }
     });
 
@@ -200,7 +327,7 @@ export class WebSpeechService {
     });
   }
 
-  // 하트비트 시작 (무활동 감지 및 자동 재시작)
+  // 하트비트 시작 (백그라운드 지속 동작 강화)
   private startHeartbeat() {
     if (typeof window === 'undefined') {
       return;
@@ -210,18 +337,28 @@ export class WebSpeechService {
       const now = Date.now();
       const timeSinceActivity = now - this.lastActivity;
       
-      // 음성인식이 켜져있어야 하는데 실제로는 꺼져있는 경우 재시작
+      // 음성인식이 켜져있어야 하는데 실제로는 꺼져있는 경우 즉시 재시작
       if (this.shouldRestart && !this.isListening) {
-        console.log('🔄 하트비트: 음성인식 비활성 상태 감지 - 재시작 시도');
+        console.log('🔄 하트비트: 음성인식 비활성 상태 감지 - 즉시 재시작');
         this.restartAttempts = 0; // 시도 횟수 초기화
-        this.scheduleRestart();
+        this.forceStart(); // 즉시 재시작 (스케줄링 없이)
       }
-      // 30초 이상 무활동 시 재시작 (더 빠른 감지)
-      else if (this.shouldRestart && this.isListening && timeSinceActivity > 30000) {
-        console.log('🔄 하트비트: 30초 무활동 감지 - 음성 인식 재시작');
+      // 더 짧은 무활동 시간으로 변경 (10초)
+      else if (this.shouldRestart && this.isListening && timeSinceActivity > 10000) {
+        console.log('🔄 하트비트: 10초 무활동 감지 - 음성 인식 재시작');
         this.restart();
       }
-    }, 10000); // 10초마다 체크 (더 자주 확인)
+      
+      // 백그라운드에서 더 적극적으로 활동 시뮬레이션
+      if (typeof document !== 'undefined' && document.hidden && this.shouldRestart) {
+        this.lastActivity = Date.now();
+        // 백그라운드에서 음성인식 상태 강제 체크 및 재시작
+        if (!this.isListening && this.shouldRestart) {
+          console.log('🔄 백그라운드에서 음성인식 중단 감지 - 강제 재시작');
+          this.forceStart();
+        }
+      }
+    }, 2000); // 2초마다 체크 (더 자주 확인)
   }
 
   // 재시작

@@ -31,7 +31,7 @@ export default function SubtitlePage() {
   const [translatedText, setTranslatedText] = useState('');
   const [isTranslating, setIsTranslating] = useState(false);
   const [originalText, setOriginalText] = useState('');
-  const [isControllerActive, setIsControllerActive] = useState(false);
+  // const [isControllerActive, setIsControllerActive] = useState(false); // 미래 사용 예정
   const [status, setStatus] = useState('대기 중');
   const [isListening, setIsListening] = useState(false);
   
@@ -74,7 +74,7 @@ export default function SubtitlePage() {
           const timeSinceLastUpdate = now - lastUpdateTime;
           const wasContinuous = timeSinceLastUpdate < 3000 && translatedText && data.translatedText && data.isTranslating;
           
-          setIsInContinuousMode(wasContinuous);
+          setIsInContinuousMode(Boolean(wasContinuous));
           
           // 기본 자막 데이터 업데이트
           setOriginalText(data.originalText || '');
@@ -83,9 +83,9 @@ export default function SubtitlePage() {
           // 연속 모드에서는 로딩 상태 숨김
           setIsTranslating(data.isTranslating && !wasContinuous);
           
-          setIsControllerActive(data.isControllerActive || false);
+          // setIsControllerActive(data.isControllerActive || false); // 미래 사용 예정
           setStatus(data.status || '대기 중');
-          setIsListening(data.isListening || false);
+          setIsListening(Boolean(data.isListening));
           
           if (data.translatedText) {
             setLastUpdateTime(now);
@@ -134,14 +134,14 @@ export default function SubtitlePage() {
           const timeSinceLastUpdate = now - lastUpdateTime;
           const wasContinuous = timeSinceLastUpdate < 3000 && translatedText && data.translatedText && data.isTranslating;
           
-          setIsInContinuousMode(wasContinuous);
+          setIsInContinuousMode(Boolean(wasContinuous));
           
           setOriginalText(data.originalText || '');
           setTranslatedText(data.translatedText || '');
           setIsTranslating(data.isTranslating && !wasContinuous);
-          setIsControllerActive(data.isControllerActive || false);
+          // setIsControllerActive(data.isControllerActive || false); // 미래 사용 예정
           setStatus(data.status || '대기 중');
-          setIsListening(data.isListening || false);
+          setIsListening(Boolean(data.isListening));
           
           if (data.translatedText) {
             setLastUpdateTime(now);

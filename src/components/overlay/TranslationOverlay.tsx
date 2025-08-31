@@ -25,7 +25,7 @@ export default function TranslationOverlay({
   const [translatedText, setTranslatedText] = useState('');
   const [isTranslating, setIsTranslating] = useState(false);
   const [error, setError] = useState('');
-  const [status, setStatus] = useState('');
+  // const [status, setStatus] = useState(''); // 미래 사용 예정
   const overlayRef = useRef<HTMLDivElement>(null);
   const translationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -48,7 +48,7 @@ export default function TranslationOverlay({
     
     try {
       setIsTranslating(true);
-      setStatus('번역 중...');
+      // setStatus('번역 중...'); // 미래 사용 예정
       
       const translated = await freeTranslationService.translate(
         text, 
@@ -58,12 +58,12 @@ export default function TranslationOverlay({
       
       setTranslatedText(translated);
       setError('');
-      setStatus('번역 완료');
+      // setStatus('번역 완료'); // 미래 사용 예정
     } catch (err) {
       console.error('번역 오류:', err);
       setError('번역에 실패했습니다. 원본 텍스트를 표시합니다.');
       setTranslatedText(text);
-      setStatus('번역 실패');
+      // setStatus('번역 실패'); // 미래 사용 예정
     } finally {
       setIsTranslating(false);
     }
@@ -90,7 +90,7 @@ export default function TranslationOverlay({
     webSpeechService.onError((error) => {
       console.error('음성 인식 오류:', error);
       setError(`음성 인식 오류: ${error}`);
-      setStatus('오류 발생');
+      // setStatus('오류 발생'); // 미래 사용 예정
     });
   }, [targetLanguage, sourceLanguage]);
 
@@ -99,16 +99,16 @@ export default function TranslationOverlay({
     if (isListening) {
       webSpeechService.stop();
       setIsListening(false);
-      setStatus('음성 인식 중지됨');
+      // setStatus('음성 인식 중지됨'); // 미래 사용 예정
     } else {
       const success = webSpeechService.start(sourceLanguage);
       if (success) {
         setIsListening(true);
         setError('');
-        setStatus('음성 인식 시작됨 - 말씀해주세요');
+        // setStatus('음성 인식 시작됨 - 말씀해주세요'); // 미래 사용 예정
       } else {
         setError('음성 인식을 시작할 수 없습니다. 마이크 권한을 확인해주세요.');
-        setStatus('시작 실패');
+        // setStatus('시작 실패'); // 미래 사용 예정
       }
     }
   };
@@ -117,7 +117,7 @@ export default function TranslationOverlay({
   useEffect(() => {
     if (isListening) {
       webSpeechService.setLanguage(sourceLanguage);
-      setStatus(`언어 변경됨: ${sourceLanguage}`);
+      // setStatus(`언어 변경됨: ${sourceLanguage}`); // 미래 사용 예정
     }
   }, [sourceLanguage, isListening]);
 

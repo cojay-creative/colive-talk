@@ -28,9 +28,9 @@ export default function Home() {
   const [syncedTranslatedText, setSyncedTranslatedText] = useState('');
   const [syncedIsListening, setSyncedIsListening] = useState(false);
   
-  // 중간 결과 처리를 위한 상태
-  const [interimText, setInterimText] = useState('');
-  const [interimTranslation, setInterimTranslation] = useState('');
+  // 중간 결과 처리를 위한 상태 (미래 사용 예정)
+  // const [interimText, setInterimText] = useState('');
+  // const [interimTranslation, setInterimTranslation] = useState('');
   const [translationTimer, setTranslationTimer] = useState<NodeJS.Timeout | null>(null);
   
   // 오버레이 표시 옵션
@@ -42,14 +42,16 @@ export default function Home() {
   // 사용자별 고유 세션 ID
   const [sessionId, setSessionId] = useState('');
   
-  // 실시간 번역 설정
+  // 실시간 번역 설정 (초고속 반응형)
   const [realtimeSettings, setRealtimeSettings] = useState({
     enableInterimTranslation: true,    // 중간 결과 번역 활성화
-    interimThreshold: 8,                // 중간 번역 시작 글자 수
+    interimThreshold: 3,                // 중간 번역 시작 글자 수 (3글자로 감소)
     autoSegmentLength: 50,              // 자동 분할 길이 (글자 수)
-    translationDelay: 1000,             // 번역 지연 시간 (ms)
+    translationDelay: 300,              // 번역 지연 시간 (1초 → 300ms)
     autoDissolveTime: 5,                // 자동 디졸브 시간 (초)
     enableAutoDissolve: true,           // 자동 디졸브 활성화
+    wordByWordMode: true,               // 단어별 실시간 번역 모드
+    instantTranslation: true,           // 즉석 번역 모드
   });
 
   // 자동 디졸브 타이머
@@ -67,53 +69,46 @@ export default function Home() {
     textAlign: 'center' as const
   });
   
-  // 자동 디졸브 타이머 관리
+  // 자동 디졸브 타이머 관리 (개선된 로직)
   const resetDissolveTimer = useCallback((hasText: boolean = false, listening: boolean = false) => {
     // 기존 타이머 클리어
     if (dissolveTimer) {
       clearTimeout(dissolveTimer);
       setDissolveTimer(null);
+      console.log('🧹 기존 디졸브 타이머 클리어');
     }
 
-    // 자동 디졸브 조건 확인:
-    // 1. 자동 디졸브가 활성화되어 있고
-    // 2. 디졸브 시간이 설정되어 있고
-    // 3. 음성인식이 활성화된 상태이고
-    // 4. 표시할 텍스트가 있는 경우에만 타이머 설정
+    // 음성인식이 중지되면 즉시 디졸브 (타이머 없이)
+    if (!listening) {
+      console.log('🛑 음성인식 중지됨 - 즉시 디졸브');
+      setSyncedOriginalText('');
+      setSyncedTranslatedText('');
+      setOriginalText('');
+      setTranslatedText('');
+      return;
+    }
+
+    // 자동 디졸브 조건: 음성인식 중이고, 텍스트가 있고, 디졸브 기능이 활성화된 경우에만
     if (realtimeSettings.enableAutoDissolve && 
         realtimeSettings.autoDissolveTime > 0 && 
         listening && 
         hasText) {
       
-      console.log(`⏰ ${realtimeSettings.autoDissolveTime}초 후 디졸브 타이머 시작`);
+      console.log(`⏰ ${realtimeSettings.autoDissolveTime}초 후 디졸브 예약`);
       
-      const timer = setTimeout(async () => {
-        console.log(`⏰ ${realtimeSettings.autoDissolveTime}초 후 자동 디졸브 실행`);
-        
-        // 디졸브 시 빈 텍스트로 업데이트 (안내 메시지가 표시됨)
-        setSyncedOriginalText('');
-        setSyncedTranslatedText('');
-        setOriginalText('');
-        setTranslatedText('');
-        
-        // API로도 전송하여 OBS 동기화 (음성인식은 계속 활성 상태로 유지)
-        if (sessionId) {
-          try {
-            await fetch('/api/subtitle-status', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                sessionId,
-                originalText: '',
-                translatedText: '',
-                isListening: true, // 음성인식은 계속 활성 상태
-                isTranslating: false
-              })
-            });
-            console.log('✅ 디졸브 API 전송 완료 (음성인식 유지)');
-          } catch (error) {
-            console.error('❌ 디졸브 API 전송 실패:', error);
-          }
+      const timer = setTimeout(() => {
+        // 타이머 실행 시점에 다시 조건 확인 (상태가 변했을 수 있음)
+        if (isListening && realtimeSettings.enableAutoDissolve) {
+          console.log(`⏰ ${realtimeSettings.autoDissolveTime}초 경과 - 자동 디졸브 실행`);
+          
+          // 모든 텍스트 상태 클리어
+          setSyncedOriginalText('');
+          setSyncedTranslatedText('');
+          setOriginalText('');
+          setTranslatedText('');
+          
+          // API도 빈 텍스트로 업데이트 (음성인식은 유지)
+          updateSubtitles('', '', true, false);
         }
       }, realtimeSettings.autoDissolveTime * 1000);
 
@@ -121,9 +116,35 @@ export default function Home() {
     }
   }, [dissolveTimer, realtimeSettings.enableAutoDissolve, realtimeSettings.autoDissolveTime, sessionId]);
 
-  // API 기반 동기화 함수
+  // 중복 전송 방지를 위한 상태
+  const [lastSentData, setLastSentData] = useState({ originalText: '', translatedText: '', isListening: false, timestamp: 0 });
+  
+  // 비동기 작업 순차 처리를 위한 상태
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingQueue, setProcessingQueue] = useState<Array<{type: string, data: any}>>([]);
+  
+  // API 기반 동기화 함수 (빈 값 전송 방지)
   const updateSubtitles = useCallback(async (originalText: string, translatedText: string, isListening: boolean, isTranslating: boolean) => {
+    // 빈 값만 전송하는 경우 방지 (음성인식 중에만 예외)
+    if (!isListening && !originalText && !translatedText) {
+      console.log('🚫 빈 값 전송 방지 - 음성인식 비활성 상태에서 빈 데이터');
+      return;
+    }
+    
+    // 데이터 해시 생성 (중복 전송 방지)
+    const dataHash = `${originalText}_${translatedText}_${isListening}`;
+    const lastHash = `${lastSentData.originalText}_${lastSentData.translatedText}_${lastSentData.isListening}`;
+    
+    // 동일한 데이터이고 지난 전송 후 0.5초가 지나지 않았으면 건너뛰기
+    if (dataHash === lastHash && (Date.now() - lastSentData.timestamp) < 500) {
+      console.log('🚫 중복 전송 방지:', dataHash);
+      return;
+    }
+    
     console.log('🔄 자막 업데이트:', { originalText, translatedText, isListening, isTranslating });
+    
+    // 마지막 전송 데이터 업데이트
+    setLastSentData({ originalText, translatedText, isListening, timestamp: Date.now() });
     
     // 음성인식이 중지되면 즉시 텍스트 클리어
     if (!isListening) {
@@ -143,8 +164,9 @@ export default function Home() {
         setDissolveTimer(null);
       }
     } else {
-      // 음성인식이 활성화된 상태에서 텍스트가 있으면 디졸브 타이머 시작
+      // 음성인식이 활성화된 상태에서는 항상 디졸브 타이머 시작 (텍스트 존재 여부와 관계없이)
       const hasText = !!(originalText || translatedText);
+      console.log(`🔄 음성인식 활성 상태 - 디졸브 타이머 시작 (텍스트 존재: ${hasText})`);
       resetDissolveTimer(hasText, isListening);
     }
     
@@ -167,7 +189,7 @@ export default function Home() {
     }
 
     // 2. API 서버에 데이터 전송 (OBS용) - 재시도 로직 포함
-    const sendToAPI = async (retryCount = 0) => {
+    const sendToAPI = async () => {
       try {
         if (!sessionId) {
           console.warn('⚠️ 세션 ID가 없어서 API 전송 건너뜀');
@@ -211,12 +233,13 @@ export default function Home() {
       }
     }
 
-    // 3. PostMessage를 통한 브로드캐스트 (브라우저 호환성)
+    // 3. PostMessage를 통한 브로드캐스트 (브라우저 호환성) - 중복 방지 로직 포함
     try {
       const postMessageData = {
         type: 'SUBTITLE_UPDATE',
         ...updateData,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        dataHash // 중복 감지를 위한 해시 추가
       };
       
       // 모든 프레임에 메시지 전송
@@ -236,73 +259,89 @@ export default function Home() {
     } catch (error) {
       console.error('❌ PostMessage 전송 실패:', error);
     }
-  }, [sourceLanguage, targetLanguage, sessionId]);
+  }, [sourceLanguage, targetLanguage, sessionId, dissolveTimer, resetDissolveTimer]);
 
-  // 중간 결과 번역 함수 (디바운스 적용)
+  // 초고속 실시간 번역 함수 (단어별 즉시 번역) - 동기화 개선
   const handleInterimTranslation = useCallback(async (text: string) => {
     if (!realtimeSettings.enableInterimTranslation) return;
     if (text.length < realtimeSettings.interimThreshold) return;
 
-    console.log('🔄 중간 결과 번역:', text);
-    setInterimText(text);
+    console.log('⚡ 실시간 번역 시작:', text);
 
     // 기존 타이머 클리어
     if (translationTimer) {
       clearTimeout(translationTimer);
+      setTranslationTimer(null);
     }
 
-    // 새 타이머 설정 (디바운스)
-    const newTimer = setTimeout(async () => {
-      try {
-        setIsTranslating(true);
-        console.log('🌍 중간 번역 시작:', text);
+    try {
+      // 즉시 번역 (타이머 없이 동기 처리)
+      console.log('🚀 즉시 번역 시작:', text);
+      
+      // 번역 품질 향상: 한 번에 완전한 번역만 수행
+      const translated = await freeTranslationService.translate(text, targetLanguage, 'ko');
+      console.log('🌍 실시간 번역 완료:', translated);
+      
+      // 번역이 원본과 다르고, 완전한 번역인 경우만 표시
+      if (translated && 
+          translated.trim() && 
+          translated !== text && 
+          !translated.includes('undefined') && 
+          !translated.includes('null')) {
         
-        const translated = await freeTranslationService.translate(text, targetLanguage, 'ko');
-        console.log('🌍 중간 번역 완료:', translated);
-        
-        setInterimTranslation(translated);
-        
-        // 중간 번역 결과도 완전한 형태로만 API 전송
-        console.log('📡 중간 번역 결과를 API에 전송:', { text, translated: `${translated} ⚡` });
-        updateSubtitles(text, `${translated} ⚡`, isListening, false); // isTranslating을 false로 변경
-        
-      } catch (error) {
-        console.error('❌ 중간 번역 실패:', error);
-      } finally {
-        setIsTranslating(false);
+        const displayText = realtimeSettings.instantTranslation ? `${translated} ⚡` : translated;
+        console.log('📡 실시간 번역 결과 전송:', displayText);
+        updateSubtitles(text, displayText, isListening, false);
+      } else {
+        // 번역이 실패하거나 부정확한 경우 전솥 안함 (깜빡임 방지)
+        console.log('⚠️ 번역 품질 문제로 전송 건너뛰기:', translated);
       }
-    }, realtimeSettings.translationDelay);
+      
+    } catch (error) {
+      console.error('❌ 실시간 번역 실패:', error);
+      // 번역 실패 시 전송 안함 (깜빡임 방지)
+    }
+  }, [targetLanguage, realtimeSettings.enableInterimTranslation, realtimeSettings.interimThreshold, realtimeSettings.instantTranslation, translationTimer, isListening, updateSubtitles]);
 
-    setTranslationTimer(newTimer);
-  }, [targetLanguage, realtimeSettings, translationTimer, isListening, updateSubtitles]);
-
-  // 긴 문장 자동 분할 처리
+  // 긴 문장 자동 분할 처리 - 동기화 개선
   const handleAutoSegmentation = useCallback(async (text: string) => {
-    if (text.length > realtimeSettings.autoSegmentLength) {
-      // 마지막 완성된 문장까지 찾기
-      const sentences = text.split(/[.!?。！？]/);
-      if (sentences.length > 1) {
-        const completeSentence = sentences.slice(0, -1).join('.') + '.';
-        console.log('🔪 문장 자동 분할:', completeSentence);
+    if (text.length <= realtimeSettings.autoSegmentLength) return;
+    
+    // 마지막 완성된 문장까지 찾기
+    const sentences = text.split(/[.!?。！？]/);
+    if (sentences.length <= 1) return;
+    
+    const completeSentence = sentences.slice(0, -1).join('.') + '.';
+    console.log('🔪 문장 자동 분할:', completeSentence);
+    
+    // 완성된 부분만 번역
+    try {
+      setIsTranslating(true);
+      const translated = await freeTranslationService.translate(completeSentence, targetLanguage, 'ko');
+      
+      // 번역 품질 검증
+      if (translated && 
+          translated.trim() && 
+          translated !== completeSentence && 
+          !translated.includes('undefined') && 
+          !translated.includes('null')) {
         
-        // 완성된 부분만 번역
-        try {
-          setIsTranslating(true);
-          const translated = await freeTranslationService.translate(completeSentence, targetLanguage, 'ko');
-          
-          setOriginalText(completeSentence);
-          setTranslatedText(translated);
-          
-          // 자동 분할 번역 완료 후에만 API 전송
-          console.log('📡 자동 분할 번역 결과를 API에 전송:', { completeSentence, translated });
-          updateSubtitles(completeSentence, translated, isListening, false);
-          
-        } catch (error) {
-          console.error('❌ 자동 분할 번역 실패:', error);
-        } finally {
-          setIsTranslating(false);
-        }
+        // 로컬 상태 업데이트 (동기화)
+        setOriginalText(completeSentence);
+        setTranslatedText(translated);
+        
+        // 자동 분할 번역 완료 후에만 API 전솤
+        console.log('📡 자동 분할 번역 결과 전송:', { completeSentence, translated });
+        updateSubtitles(completeSentence, translated, isListening, false);
+      } else {
+        // 번역 품질 문제시 전송 안함 (깜빡임 방지)
+        console.log('⚠️ 자동 분할 번역 품질 문제로 전송 건너뛰기');
       }
+      
+    } catch (error) {
+      console.error('❌ 자동 분할 번역 실패:', error);
+    } finally {
+      setIsTranslating(false);
     }
   }, [targetLanguage, realtimeSettings.autoSegmentLength, isListening, updateSubtitles]);
   
@@ -350,26 +389,45 @@ export default function Home() {
         setStatus('번역 중...');
         setIsTranslating(true);
         
-        // 중간 번역 타이머 클리어 (최종 결과이므로)
+        // 중간 번역 타이머 및 처리 중단
         if (translationTimer) {
           clearTimeout(translationTimer);
           setTranslationTimer(null);
         }
         
-        // 번역 중에는 로컬 상태만 업데이트 (API 전송 안함)
-        // updateSubtitles(text, '', isListening, true); // 제거: 중간 상태 전송 방지
+        // 처리 중이면 중단
+        setIsProcessing(false);
+        setProcessingQueue([]); // 대기열 비우기
+        
+        console.log('🏁 최종 음성 인식 결과 - 모든 중간 처리 중단');
         
         // 자동 번역
         freeTranslationService.translate(text, targetLanguage, 'ko')
           .then((translated) => {
             console.log('🌍 번역 결과:', translated);
-            setTranslatedText(translated);
-            setIsTranslating(false);
-            setStatus('번역 완료');
             
-            // ✅ 번역 완료 후에만 API 전송 (최종 상태만)
-            console.log('📡 최종 번역 결과를 API에 전송:', { text, translated });
-            updateSubtitles(text, translated, isListening, false);
+            // 번역 품질 검증 (최종 결과)
+            if (translated && 
+                translated.trim() && 
+                translated !== text && 
+                !translated.includes('undefined') && 
+                !translated.includes('null')) {
+              
+              setTranslatedText(translated);
+              setIsTranslating(false);
+              setStatus('번역 완료');
+              
+              // ✅ 최종 번역 결과 전송 (최고 우선순위)
+              console.log('🏆 최종 번역 결과 전송:', { text, translated });
+              updateSubtitles(text, translated, isListening, false);
+            } else {
+              // 번역 품질 문제시 원본만 표시
+              console.log('⚠️ 최종 번역 품질 문제로 원본만 표시:', translated);
+              setTranslatedText('');
+              setIsTranslating(false);
+              setStatus('번역 품질 문제');
+              updateSubtitles(text, '', isListening, true);
+            }
           })
           .catch((error) => {
             console.error('번역 오류:', error);
@@ -377,58 +435,111 @@ export default function Home() {
             setIsTranslating(false);
             setStatus('번역 실패');
             
-            // 동기화 서비스에 오류 상태 업데이트
-            syncService.updateData({
-              originalText: text,
-              translatedText: '',
-              isTranslating: false,
-              status: '번역 실패',
-              error: '번역에 실패했습니다.',
-              sourceLanguage: sourceLanguage,
-              targetLanguage: targetLanguage,
-              isListening: isListening
-            });
+            // 오류 상태도 updateSubtitles로 통합 처리
+            updateSubtitles(text, '', isListening, false);
           });
       });
 
-      // 중간 결과 처리 (실시간 번역)
-      webSpeechService.onInterimResult((text: string) => {
+      // 중간 결과 처리 (실시간 번역) - 순차 처리
+      webSpeechService.onInterimResult(async (text: string) => {
         console.log('🔄 중간 음성 인식 결과:', text);
         
-        // 자동 분할 처리
-        handleAutoSegmentation(text);
+        // 이미 처리 중이면 대기열에 추가
+        if (isProcessing) {
+          console.log('🔄 이미 처리 중 - 대기열에 추가');
+          setProcessingQueue(prev => [...prev.slice(-2), {type: 'interim', data: text}]); // 최대 3개만 유지
+          return;
+        }
         
-        // 중간 번역 처리
-        handleInterimTranslation(text);
+        setIsProcessing(true);
+        
+        try {
+          // 자동 분할 처리 (우선순위)
+          if (text.length > realtimeSettings.autoSegmentLength) {
+            await handleAutoSegmentation(text);
+          } else {
+            // 중간 번역 처리
+            await handleInterimTranslation(text);
+          }
+        } catch (error) {
+          console.error('😨 중간 처리 오류:', error);
+        } finally {
+          setIsProcessing(false);
+          
+          // 대기열에 작업이 있으면 처리
+          setProcessingQueue(prev => {
+            if (prev.length > 0) {
+              const next = prev[prev.length - 1]; // 가장 최신 작업만 처리
+              console.log('🔄 대기열에서 작업 처리:', next.data);
+              
+              setTimeout(async () => {
+                setIsProcessing(true);
+                try {
+                  if (next.data.length > realtimeSettings.autoSegmentLength) {
+                    await handleAutoSegmentation(next.data);
+                  } else {
+                    await handleInterimTranslation(next.data);
+                  }
+                } finally {
+                  setIsProcessing(false);
+                }
+              }, 100);
+              
+              return []; // 대기열 비우기
+            }
+            return prev;
+          });
+        }
       });
 
       webSpeechService.onError((error: string) => {
         console.error('🚨 음성 인식 오류:', error);
-        setError(`음성 인식 오류: ${error}`);
-        setStatus('오류 발생');
-        setIsListening(false);
         
-        // 동기화 서비스에 오류 상태 업데이트
-        syncService.updateData({
-          error: `음성 인식 오류: ${error}`,
-          status: '오류 발생',
-          isListening: false,
-          sourceLanguage: sourceLanguage,
-          targetLanguage: targetLanguage
-        });
+        // 복구 가능한 오류 - 네트워크 오류 등 자동 복구 가능한 경우
+        const recoverableErrors = ['network', 'audio-capture', 'aborted', 'no-speech', 'service-not-allowed'];
+        const isRecoverable = recoverableErrors.some(recoverable => error.includes(recoverable));
+        
+        if (isRecoverable) {
+          console.log('🔄 복구 가능한 오류 - UI 상태 유지하며 자동 복구 대기:', error);
+          
+          // UI 상태는 "listening" 유지 - 사용자가 중지한 게 아니므로
+          // setIsListening(false); // 이 줄을 제거 - 상태 유지
+          
+          setError(`네트워크 문제로 재연결 중입니다... (${error})`);
+          setStatus('🔄 재연결 시도 중...');
+          
+          // 연결 상태를 사용자에게 알리지만 음성인식은 계속 시도 중임을 표시
+          console.log('💡 음성인식 상태 유지 - 자동 재시작 대기 중');
+          
+          // 5초 후 재연결 상태 메시지 자동 제거 (더 오래 표시)
+          setTimeout(() => {
+            // 여전히 같은 오류 상태면 메시지 제거하고 정상 상태로
+            if (error.includes('network') && isListening) {
+              setError('');
+              setStatus('🎤 음성 인식 활성');
+            }
+          }, 5000);
+          
+        } else {
+          // 복구 불가능한 오류 - 사용자 개입 필요 (마이크 권한 거부 등)
+          console.error('❌ 복구 불가능한 오류 - 사용자 개입 필요:', error);
+          setError(`음성 인식 오류: ${error}`);
+          setStatus('⚠️ 오류 발생 - 다시 시작해주세요');
+          setIsListening(false); // 이런 오류만 완전히 중지
+          
+          // 동기화 서비스에 중지 상태 전송
+          updateSubtitles('', '', false, false);
+        }
+        
+        console.log('😨 오류 발생 - 상태:', { error, isRecoverable, isListening });
       });
 
       webSpeechService.onStatus((status: string) => {
         console.log('📊 음성 인식 상태:', status);
         setStatus(status);
         
-        // 동기화 서비스에 상태 업데이트
-        syncService.updateData({
-          status: status,
-          sourceLanguage: sourceLanguage,
-          targetLanguage: targetLanguage,
-          isListening: isListening
-        });
+        // 상태 업데이트는 updateSubtitles로 통합 처리 (중복 방지)
+        // updateSubtitles로 대체됨
       });
     } catch (error) {
       console.error('초기화 오류:', error);
@@ -440,17 +551,8 @@ export default function Home() {
       setStatus('준비 완료');
       console.log('✅ 상태 업데이트 성공');
       
-      // 동기화 서비스에 초기 상태 업데이트
-      console.log('🔄 초기 상태 동기화 서비스 업데이트');
-      syncService.updateData({
-        status: '준비 완료',
-        sourceLanguage: sourceLanguage,
-        targetLanguage: targetLanguage,
-        isListening: isListening,
-        originalText: originalText,
-        translatedText: translatedText,
-        isTranslating: isTranslating
-      });
+      // 초기 상태는 전송하지 않음 (빈 값 전송 방지)
+      console.log('🔄 초기 상태 - 전송 건너뛰기');
     }, 1000);
 
     return () => {
@@ -463,7 +565,7 @@ export default function Home() {
       }
       console.log('🎯 Home 컴포넌트 언마운트');
     };
-  }, [targetLanguage, sourceLanguage, isListening, handleAutoSegmentation, handleInterimTranslation, translationTimer, updateSubtitles]);
+  }, [targetLanguage, sourceLanguage, isListening, translationTimer]);
 
   // localStorage 실시간 동기화 (미리보기용)
   useEffect(() => {
@@ -476,6 +578,12 @@ export default function Home() {
         const stored = localStorage.getItem(STORAGE_KEY);
         if (stored) {
           const data = JSON.parse(stored);
+          // 빈 데이터를 수신한 경우 믴시 (상태 업데이트 방지)
+          if (!data.originalText && !data.translatedText && !data.isListening) {
+            console.log('🚫 미리보기: 빈 데이터 무시');
+            return;
+          }
+          
           console.log('🔄 미리보기 동기화 데이터 수신:', {
             originalText: data.originalText,
             translatedText: data.translatedText,
@@ -504,8 +612,8 @@ export default function Home() {
 
     window.addEventListener('storage', handleStorageChange);
 
-    // 빠른 폴링으로 같은 탭 내 변경사항도 감지
-    const interval = setInterval(loadSyncData, 100);
+    // 빠른 폴링으로 같은 탭 내 변경사항도 감지 (간격 연장)
+    const interval = setInterval(loadSyncData, 300); // 100ms → 300ms로 변경
 
     return () => {
       window.removeEventListener('storage', handleStorageChange);
@@ -544,15 +652,30 @@ export default function Home() {
         });
       }
     } else {
-      // 음성 인식 중지
+      // 사용자가 명시적으로 중지 버튼을 눌렀을 때만 완전히 중지
+      console.log('📋 사용자가 음성 인식 중지 버튼 클릭 - 완전 중지');
+      
+      // 모든 자동 재시작 기능 비활성화
       webSpeechService.stop();
+      
+      // UI 상태 업데이트
       setIsListening(false);
       setStatus('음성 인식 중지됨');
+      setError(''); // 오류 메시지 제거
+      
+      // 모든 처리 중단
+      setIsProcessing(false);
+      setProcessingQueue([]);
+      
+      if (translationTimer) {
+        clearTimeout(translationTimer);
+        setTranslationTimer(null);
+      }
       
       // 음성 인식 중지 동기화
       updateSubtitles(originalText, translatedText, false, false);
     }
-  }, [isListening, sourceLanguage, targetLanguage, originalText, translatedText, updateSubtitles]);
+  }, [isListening, sourceLanguage, targetLanguage, originalText, translatedText]);
 
   const toggleDarkMode = useCallback(() => {
     setIsDarkMode(!isDarkMode);
@@ -732,10 +855,23 @@ export default function Home() {
                   </button>
                 </div>
                 
-                <div className="mt-4 p-4 rounded-lg border bg-[#00B1A9]/5 border-[#00B1A9]/20">
-                  <div className="text-sm text-[#00B1A9]">
+                <div className={`mt-4 p-4 rounded-lg border ${
+                  status.includes('재연결') 
+                    ? 'bg-yellow-50 border-yellow-200' 
+                    : 'bg-[#00B1A9]/5 border-[#00B1A9]/20'
+                }`}>
+                  <div className={`text-sm ${
+                    status.includes('재연결') 
+                      ? 'text-yellow-700' 
+                      : 'text-[#00B1A9]'
+                  }`}>
                     💡 <strong>현재 상태:</strong> {status}
                   </div>
+                  {status.includes('재연결') && (
+                    <div className="text-xs text-yellow-600 mt-1">
+                      🔄 음성인식은 계속 활성 상태입니다. 네트워크가 복구되면 자동으로 재개됩니다.
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -786,11 +922,27 @@ export default function Home() {
               <div className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg p-4 shadow-sm border transition-all duration-300`}>
                 <h3 className={`text-lg font-bold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>📊 시스템 상태</h3>
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="p-4 rounded-lg border bg-gray-50 border-gray-200">
+                  <div className={`p-4 rounded-lg border ${
+                    status.includes('재연결') 
+                      ? 'bg-yellow-50 border-yellow-200' 
+                      : 'bg-gray-50 border-gray-200'
+                  }`}>
                     <div className="text-sm mb-2">음성 인식:</div>
-                    <div className={`text-lg font-medium ${isListening ? 'text-green-500' : 'text-red-500'}`}>
-                      {isListening ? '🟢 활성' : '🔴 비활성'}
+                    <div className={`text-lg font-medium ${
+                      isListening 
+                        ? (status.includes('재연결') ? 'text-yellow-500' : 'text-green-500')
+                        : 'text-red-500'
+                    }`}>
+                      {isListening 
+                        ? (status.includes('재연결') ? '🟡 재연결 중' : '🟢 활성')
+                        : '🔴 비활성'
+                      }
                     </div>
+                    {status.includes('재연결') && isListening && (
+                      <div className="text-xs text-yellow-600 mt-1">
+                        네트워크 문제로 재연결 시도 중
+                      </div>
+                    )}
                   </div>
                   
                   <div className="p-4 rounded-lg border bg-gray-50 border-gray-200">

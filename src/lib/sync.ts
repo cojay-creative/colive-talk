@@ -113,7 +113,7 @@ export class SyncService {
       ...layoutSettings
     };
     
-    this.updateData({ layoutSettings: updatedLayoutSettings });
+    this.updateData({ layoutSettings: updatedLayoutSettings as LayoutSettings });
   }
 
   // 현재 데이터 조회

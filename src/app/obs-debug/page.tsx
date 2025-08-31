@@ -26,7 +26,7 @@ export default function OBSDebugPage() {
         const stored = localStorage.getItem('subtitle_sync_data');
         setLocalStorageData(stored ? JSON.parse(stored) : null);
       } catch (error) {
-        setLocalStorageData({ error: error.message });
+        setLocalStorageData({ error: (error as Error).message });
       }
     };
 
@@ -34,7 +34,7 @@ export default function OBSDebugPage() {
       try {
         setGlobalData((window as any).SUBTITLE_DATA || null);
       } catch (error) {
-        setGlobalData({ error: error.message });
+        setGlobalData({ error: (error as Error).message });
       }
     };
 
@@ -44,7 +44,7 @@ export default function OBSDebugPage() {
         const data = await response.json();
         setApiData(data);
       } catch (error) {
-        setApiData({ error: error.message });
+        setApiData({ error: (error as Error).message });
       }
     };
 

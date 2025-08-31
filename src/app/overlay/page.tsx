@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 
 interface SubtitleData {
   originalText: string;
@@ -25,6 +25,13 @@ export default function OverlayPage() {
   const [textColor, setTextColor] = useState('#ffffff');
   const [opacity, setOpacity] = useState(1);
   const [isMounted, setIsMounted] = useState(false);
+  
+  // 자동 디졸브 관련 상태
+  const [shouldShow, setShouldShow] = useState(true);
+  const [dissolveTimer, setDissolveTimer] = useState<NodeJS.Timeout | null>(null);
+  const [lastTextUpdate, setLastTextUpdate] = useState(0);
+  const [autoDissolveTime, setAutoDissolveTime] = useState(5); // 기본 5초
+  const [enableAutoDissolve, setEnableAutoDissolve] = useState(true);
 
   console.log('🎬 오버레이 렌더링:', { translatedText, originalText, isListening });
   
@@ -142,141 +149,186 @@ export default function OverlayPage() {
     }
   }, [isMounted]);
 
-  // 실시간 동기화 - localStorage + PostMessage + 폴링 (OBS 호환)
+  // OBS 최적화 실시간 동기화 (데이터 정합성 보장)
   useEffect(() => {
     if (!isMounted) return;
     const STORAGE_KEY = 'subtitle_sync_data';
     
-    const loadData = async () => {
-      // URL에서 sessionId 가져오기
-      const params = new URLSearchParams(window.location.search);
-      const sessionId = params.get('sessionId');
+    // 데이터 정합성을 위한 상태 추적
+    let lastUpdateTimestamp = 0;
+    let lastDataHash = '';
+    let isUpdating = false;
+    
+    const generateDataHash = (original: string, translated: string, listening: boolean) => {
+      return `${original}_${translated}_${listening}`;
+    };
+    
+    const updateDisplayData = (originalText: string, translatedText: string, isListening: boolean, source: string) => {
+      const newHash = generateDataHash(originalText, translatedText, isListening);
       
-      // 1. API에서 데이터 로드 시도 (OBS용)
+      // 같은 데이터면 업데이트 건너뛰기 (깜빡임 방지)
+      if (newHash === lastDataHash) {
+        console.log(`🚫 [${source}] 동일한 데이터 - 업데이트 건너뛰기:`, newHash);
+        return false;
+      }
+      
+      console.log(`🔄 [${source}] 데이터 업데이트:`, { originalText, translatedText, isListening });
+      addDebugInfo(`[${source}] 업데이트: "${translatedText}" (듣기: ${isListening})`);
+      
+      // 상태 업데이트 (배치로 처리)
+      setOriginalText(prev => prev !== originalText ? originalText : prev);
+      setTranslatedText(prev => prev !== translatedText ? translatedText : prev);
+      setIsListening(prev => prev !== isListening ? isListening : prev);
+      
+      // 텍스트가 있으면 표시하고 디졸브 타이머 시작
+      const hasText = (originalText && originalText.trim()) || (translatedText && translatedText.trim());
+      
+      if (hasText) {
+        setShouldShow(true);
+        setLastTextUpdate(Date.now());
+        startDissolveTimer();
+      } else if (!isListening) {
+        // 음성인식이 꺼지면 즉시 숨김
+        setShouldShow(false);
+        clearDissolveTimer();
+      }
+      
+      lastDataHash = newHash;
+      lastUpdateTimestamp = Date.now();
+      
+      return true;
+    };
+    
+    const loadData = async () => {
+      if (isUpdating) return; // 이미 업데이트 중이면 건너뛰기
+      isUpdating = true;
+      
       try {
-        if (!sessionId) {
-          addDebugInfo('세션 ID가 없어서 API 호출 건너뜀');
-          return;
-        }
+        // URL에서 sessionId 가져오기
+        const params = new URLSearchParams(window.location.search);
+        const sessionId = params.get('sessionId');
         
-        const response = await fetch(`/api/subtitle-status?sessionId=${sessionId}`);
-        if (response.ok) {
-          const result = await response.json();
-          const data = result.data;
-          
-          if (data && (data.originalText || data.translatedText)) {
-            addDebugInfo(`API 데이터: 원본="${data.originalText}" 번역="${data.translatedText}" 듣기=${data.isListening}`);
-            
-            console.log('📡 API 동기화 데이터 수신:', {
-              originalText: data.originalText,
-              translatedText: data.translatedText,
-              isListening: data.isListening,
-              isTranslating: data.isTranslating,
-              timestamp: data.timestamp
+        // 1. API 우선 (OBS 환경에서 가장 안정적)
+        if (sessionId) {
+          try {
+            const response = await fetch(`/api/subtitle-status?sessionId=${sessionId}`, {
+              method: 'GET',
+              headers: { 'Cache-Control': 'no-cache' }
             });
             
-            setOriginalText(data.originalText || '');
-            setTranslatedText(data.translatedText || '');
-            setIsListening(data.isListening || false);
-            return; // API에서 성공적으로 받아왔으면 localStorage 확인 안함
+            if (response.ok) {
+              const result = await response.json();
+              const data = result.data;
+              
+              if (data && data.timestamp > lastUpdateTimestamp) {
+                const updated = updateDisplayData(
+                  data.originalText || '',
+                  data.translatedText || '',
+                  data.isListening || false,
+                  'API'
+                );
+                
+                if (updated) {
+                  isUpdating = false;
+                  return; // API에서 성공적으로 업데이트했으면 종료
+                }
+              }
+            }
+          } catch (apiError) {
+            console.log('API 접근 실패, localStorage로 폴백');
           }
         }
-      } catch (error) {
-        // API 실패는 조용히 처리하고 localStorage로 폴백
-        console.log('API 접근 실패, localStorage로 폴백:', error.message);
-      }
 
-      // 2. localStorage에서 데이터 로드 (브라우저용)
-      try {
-        if (typeof window === 'undefined') return;
-        
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          const data: SubtitleData = JSON.parse(stored);
-          
-          // 디버그 정보 추가
-          addDebugInfo(`localStorage 데이터: 원본="${data.originalText}" 번역="${data.translatedText}" 듣기=${data.isListening}`);
-          
-          console.log('📦 localStorage 동기화 데이터 수신:', {
-            originalText: data.originalText,
-            translatedText: data.translatedText,
-            isListening: data.isListening,
-            isTranslating: data.isTranslating,
-            timestamp: data.timestamp
-          });
-          
-          setOriginalText(data.originalText || '');
-          setTranslatedText(data.translatedText || '');
-          setIsListening(data.isListening || false);
-          
-          // 레이아웃 설정 업데이트
-          if (data.layoutSettings) {
-            setFontSize(data.layoutSettings.fontSize || 24);
-            setBackgroundColor(data.layoutSettings.backgroundColor || '#000000');
-            setTextColor(data.layoutSettings.textColor || '#ffffff');
-            setOpacity(data.layoutSettings.opacity || 1);
+        // 2. localStorage 폴백 (브라우저 환경)
+        try {
+          const stored = localStorage.getItem(STORAGE_KEY);
+          if (stored) {
+            const data: SubtitleData = JSON.parse(stored);
+            
+            if (data.timestamp > lastUpdateTimestamp) {
+              updateDisplayData(
+                data.originalText || '',
+                data.translatedText || '',
+                data.isListening || false,
+                'localStorage'
+              );
+              
+              // 레이아웃 설정 업데이트 (깜빡임 없이)
+              if (data.layoutSettings) {
+                setFontSize(prev => data.layoutSettings?.fontSize ?? prev);
+                setBackgroundColor(prev => data.layoutSettings?.backgroundColor ?? prev);
+                setTextColor(prev => data.layoutSettings?.textColor ?? prev);
+                setOpacity(prev => data.layoutSettings?.opacity ?? prev);
+                
+                // 디졸브 설정도 업데이트
+                if (data.layoutSettings.autoDissolveTime !== undefined) {
+                  setAutoDissolveTime(data.layoutSettings.autoDissolveTime);
+                }
+                if (data.layoutSettings.enableAutoDissolve !== undefined) {
+                  setEnableAutoDissolve(data.layoutSettings.enableAutoDissolve);
+                }
+              }
+            }
           }
-        } else {
-          addDebugInfo('localStorage에 데이터 없음');
+        } catch (storageError) {
+          addDebugInfo(`localStorage 오류: ${(storageError as Error).message}`);
         }
-      } catch (error) {
-        console.error('❌ localStorage 로드 실패:', error);
-        addDebugInfo(`localStorage 로드 오류: ${error.message}`);
+      } finally {
+        isUpdating = false;
       }
     };
 
-    // PostMessage 리스너 (OBS 환경에서 주로 사용)
+    // PostMessage 리스너 (우선순위 높음)
     const handlePostMessage = (event: MessageEvent) => {
       try {
-        if (event.data && event.data.type === 'SUBTITLE_UPDATE') {
+        if (event.data && event.data.type === 'SUBTITLE_UPDATE' && event.data.timestamp) {
           const data = event.data;
-          addDebugInfo(`PostMessage 데이터: 원본="${data.originalText}" 번역="${data.translatedText}" 듣기=${data.isListening}`);
           
-          console.log('📡 PostMessage 동기화 데이터 수신:', {
-            originalText: data.originalText,
-            translatedText: data.translatedText,
-            isListening: data.isListening,
-            isTranslating: data.isTranslating
-          });
-          
-          setOriginalText(data.originalText || '');
-          setTranslatedText(data.translatedText || '');
-          setIsListening(data.isListening || false);
+          // 최신 데이터인지 확인
+          if (data.timestamp > lastUpdateTimestamp) {
+            updateDisplayData(
+              data.originalText || '',
+              data.translatedText || '',
+              data.isListening || false,
+              'PostMessage'
+            );
+          }
         }
       } catch (error) {
-        console.error('❌ PostMessage 처리 실패:', error);
-        addDebugInfo(`PostMessage 오류: ${error.message}`);
+        addDebugInfo(`PostMessage 오류: ${(error as Error).message}`);
       }
     };
 
-    // 즉시 로드
-    loadData();
-
-    // storage 이벤트 리스너 (브라우저 환경)
+    // storage 이벤트 리스너 (동일 브라우저 내 탭 동기화)
     const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === STORAGE_KEY) {
-        console.log('🔄 storage 이벤트 감지');
-        addDebugInfo('Storage 이벤트 감지됨');
+      if (e.key === STORAGE_KEY && !isUpdating) {
         loadData();
       }
     };
 
+    // 이벤트 리스너 등록
     window.addEventListener('storage', handleStorageChange);
     window.addEventListener('message', handlePostMessage);
 
-    // 빠른 폴링으로 강제 동기화 (OBS 호환성)
-    const interval = setInterval(loadData, 200);
+    // 즉시 로드
+    loadData();
+
+    // OBS 최적화된 폴링 (중복 방지, 성능 최적화)
+    const interval = setInterval(() => {
+      // OBS 환경에서만 더 적극적으로 폴링
+      if ((isOBS || window.location.href.includes('overlay')) && !isUpdating) {
+        loadData();
+      }
+    }, isOBS ? 500 : 1000); // OBS에서는 500ms, 일반 브라우저에서는 1초 (더 안정적)
     
-    addDebugInfo(`동기화 시작 - API + localStorage + PostMessage + 200ms 폴링`);
-    console.log('🎧 멀티 동기화 리스너 설정 완료 (API우선)');
+    addDebugInfo(`OBS 최적화 동기화 시작 (${isOBS ? '300ms' : '500ms'} 폴링)`);
 
     return () => {
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('message', handlePostMessage);
       clearInterval(interval);
-      console.log('🔌 멀티 동기화 리스너 해제');
     };
-  }, [isMounted]);
+  }, [isMounted, isOBS]);
 
   // RGBA 변환
   const hexToRgba = (hex: string, alpha: number) => {
@@ -286,48 +338,94 @@ export default function OverlayPage() {
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   };
 
-  // 표시할 텍스트 결정 (번역 텍스트 우선)
-  const getDisplayText = () => {
-    console.log('🎯 텍스트 결정 로직:', {
-      isListening,
-      translatedText,
-      originalText,
-      translatedTextLength: translatedText?.length,
-      originalTextLength: originalText?.length
-    });
+  // 디졸브 타이머 관리
+  const startDissolveTimer = () => {
+    // 기존 타이머 클리어
+    if (dissolveTimer) {
+      clearTimeout(dissolveTimer);
+      setDissolveTimer(null);
+    }
     
-    // 번역된 텍스트가 있으면 우선 표시
-    if (translatedText) {
-      console.log('→ 번역된 텍스트 표시:', translatedText);
+    // 디졸브 기능이 비활성화되었거나 음성인식이 꺼져있으면 타이머 시작하지 않음
+    if (!enableAutoDissolve || !isListening) {
+      return;
+    }
+    
+    // 텍스트가 있을 때만 타이머 시작
+    if ((originalText && originalText.trim()) || (translatedText && translatedText.trim())) {
+      const timer = setTimeout(() => {
+        console.log(`⏰ ${autoDissolveTime}초 경과 - 자동 디졸브 실행`);
+        setShouldShow(false);
+        addDebugInfo('자동 디졸브 실행됨');
+      }, autoDissolveTime * 1000);
+      
+      setDissolveTimer(timer);
+      addDebugInfo(`디졸브 타이머 시작: ${autoDissolveTime}초`);
+    }
+  };
+  
+  const clearDissolveTimer = () => {
+    if (dissolveTimer) {
+      clearTimeout(dissolveTimer);
+      setDissolveTimer(null);
+      addDebugInfo('디졸브 타이머 클리어됨');
+    }
+  };
+
+  // OBS 최적화된 텍스트 결정 (수정된 로직)
+  const getDisplayText = () => {
+    // 디졸브로 숨겨진 상태면 빈 문자열 반환
+    if (!shouldShow) {
+      return '';
+    }
+    
+    // OBS에서는 로깅을 최소화하여 성능 향상
+    if (!isOBS) {
+      console.log('🎯 텍스트 결정 로직:', {
+        shouldShow,
+        isListening,
+        translatedText,
+        originalText
+      });
+    }
+    
+    // 번역된 텍스트가 있으면 우선 표시 (완전한 번역만)
+    if (translatedText && translatedText.trim() && 
+        !translatedText.includes('undefined') && 
+        !translatedText.includes('null') &&
+        translatedText !== originalText) {
       return translatedText;
     }
     
-    // 원본 텍스트가 있으면 표시
-    if (originalText) {
-      console.log('→ 원본 텍스트 표시:', originalText);
+    // 원본 텍스트가 있으면 표시 (번역 대기 상태)
+    if (originalText && originalText.trim() &&
+        !originalText.includes('undefined') &&
+        !originalText.includes('null')) {
       return originalText;
     }
     
     // 음성인식이 꺼져있으면 관리자 설정 안내 메시지
     if (!isListening) {
-      console.log('→ 음성인식 꺼짐: 관리자 안내 메시지 표시');
       return adminSettings.inactiveMessage;
     }
     
-    // 기본 대기 메시지 (관리자 설정)
-    console.log('→ 기본 대기 메시지 표시 (관리자 설정)');
-    return adminSettings.listeningMessage;
+    // ❗ 중요: 음성인식 중에는 텍스트가 없으면 빈 문자열 반환 (메시지 숨김)
+    return '';
   };
 
-  const displayText = getDisplayText();
-  const bgColor = hexToRgba(backgroundColor, opacity);
+  // OBS 최적화: 메모이제이션으로 불필요한 재계산 방지
+  const displayText = useMemo(() => getDisplayText(), [translatedText, originalText, isListening, adminSettings, shouldShow]);
+  const bgColor = useMemo(() => hexToRgba(backgroundColor, opacity), [backgroundColor, opacity]);
   
-  console.log('🎬 최종 렌더링 정보:', {
-    displayText,
-    bgColor,
-    fontSize,
-    textColor
-  });
+  // OBS에서는 로깅 최소화
+  if (!isOBS) {
+    console.log('🎬 최종 렌더링 정보:', {
+      displayText,
+      bgColor,
+      fontSize,
+      textColor
+    });
+  }
 
   // 마운트되기 전에는 최소한의 UI만 렌더링
   if (!isMounted) {
@@ -412,7 +510,8 @@ export default function OverlayPage() {
         </div>
       )}
 
-      {/* 자막 표시 */}
+      {/* 자막 표시 - 텍스트가 있을 때만 표시 */}
+      {displayText && displayText.trim() && (
       <div style={{
         position: 'absolute',
         bottom: '50px',
@@ -450,6 +549,7 @@ export default function OverlayPage() {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
