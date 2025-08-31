@@ -1,10 +1,21 @@
 // 무료 번역 서비스 (최적화된 속도)
 export class FreeTranslationService {
-  // CORS 문제가 있는 서버들 제거하고 안정적인 서비스만 사용
+  // 고품질 AI 번역을 위한 다양한 서비스들 (CORS 안전한 것들만)
   private services = [
+    // 1순위: MyMemory (안정적이고 빠름)
     { url: 'https://api.mymemory.translated.net/get', type: 'mymemory' },
-    { url: 'https://libretranslate.com/translate', type: 'libretranslate' } // 400 오류는 있지만 CORS는 통과
-    // CORS 문제로 제거: libretranslate.de, translate.fedilab.app, translate.terraprint.co
+    
+    // 2순위: 추가 LibreTranslate 인스턴스들 (AI 기반 번역)
+    { url: 'https://libretranslate.com/translate', type: 'libretranslate' },
+    { url: 'https://translate.argosopentech.com/translate', type: 'libretranslate' },
+    { url: 'https://translate.mentality.rip/translate', type: 'libretranslate' },
+    { url: 'https://libretranslate.pussthecat.org/translate', type: 'libretranslate' },
+    
+    // 3순위: Microsoft Translator 공개 API (고품질 AI)
+    { url: 'https://api.cognitive.microsofttranslator.com/translate', type: 'microsoft' },
+    
+    // 4순위: Google Translate 무료 엔드포인트 (고품질 AI)
+    { url: 'https://translate.googleapis.com/translate_a/single', type: 'google' }
   ];
   
   private cache = new Map<string, {translation: string, timestamp: number}>();
@@ -256,6 +267,107 @@ export class FreeTranslationService {
     return null;
   }
 
+  // Google Translate 무료 API 호출 (고품질 AI 번역)
+  private async translateWithGoogle(text: string, sourceLang: string, targetLang: string): Promise<string | null> {
+    try {
+      console.log(`🌐 Google Translate API 호출`);
+      
+      // Google Translate 무료 엔드포인트 URL 구성
+      const params = new URLSearchParams({
+        client: 'gtx',
+        sl: sourceLang,
+        tl: targetLang,
+        dt: 't',
+        q: text
+      });
+      
+      const url = `https://translate.googleapis.com/translate_a/single?${params}`;
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: { 
+          'Accept': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (compatible)'
+        },
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+      console.log(`📡 Google Translate 응답 상태: ${response.status}`);
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`📄 Google Translate 응답 데이터:`, data);
+        
+        // Google Translate 응답 구조: [[[translated_text, original_text, ...]]]
+        if (data && data[0] && data[0][0] && data[0][0][0]) {
+          const translated = data[0][0][0];
+          console.log(`✅ Google Translate 번역 성공: "${translated}"`);
+          return translated;
+        }
+      } else {
+        console.log(`❌ Google Translate HTTP 오류: ${response.status} ${response.statusText}`);
+      }
+    } catch (error) {
+      if ((error as Error).name === 'AbortError') {
+        console.warn(`⏰ Google Translate 타임아웃`);
+      } else {
+        console.warn(`❌ Google Translate 오류:`, error);
+      }
+    }
+    return null;
+  }
+
+  // Microsoft Translator 무료 API 호출 (고품질 AI 번역)
+  private async translateWithMicrosoft(text: string, sourceLang: string, targetLang: string): Promise<string | null> {
+    try {
+      console.log(`🌐 Microsoft Translator API 호출`);
+      
+      // Microsoft Translator 무료 엔드포인트
+      const url = `https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&from=${sourceLang}&to=${targetLang}`;
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify([{ text: text }]),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+      console.log(`📡 Microsoft Translator 응답 상태: ${response.status}`);
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`📄 Microsoft Translator 응답 데이터:`, data);
+        
+        // Microsoft 응답 구조: [{translations: [{text: "translated_text"}]}]
+        if (data && data[0] && data[0].translations && data[0].translations[0]) {
+          const translated = data[0].translations[0].text;
+          console.log(`✅ Microsoft Translator 번역 성공: "${translated}"`);
+          return translated;
+        }
+      } else {
+        console.log(`❌ Microsoft Translator HTTP 오류: ${response.status} ${response.statusText}`);
+      }
+    } catch (error) {
+      if ((error as Error).name === 'AbortError') {
+        console.warn(`⏰ Microsoft Translator 타임아웃`);
+      } else {
+        console.warn(`❌ Microsoft Translator 오류:`, error);
+      }
+    }
+    return null;
+  }
+
   // 폴백 번역 (키워드 기반)
   private tryFallbackTranslation(text: string, sourceLang: string, targetLang: string): string | null {
     const cleanText = text.trim();
@@ -308,43 +420,62 @@ export class FreeTranslationService {
     const startTime = Date.now();
 
     try {
-      // 폴백 번역을 먼저 확인 (가장 빠름)
-      const fallbackResult = this.tryFallbackTranslation(text, sourceLang, targetLang);
-      if (fallbackResult) {
-        console.log(`⚡ 폴백 번역 즉시 반환 (0ms): ${fallbackResult}`);
-        return fallbackResult;
-      }
-
-      // MyMemory API 시도 (타임아웃 단축)
-      console.log('🔄 MyMemory API 초고속 시도...');
+      // 🚀 1순위: MyMemory API 시도 (빠르고 안정적)
+      console.log('🔄 MyMemory API 시도...');
       const myMemoryResult = await Promise.race([
         this.translateWithMyMemory(text, sourceLang, targetLang),
-        new Promise<null>((_, reject) => setTimeout(() => reject(new Error('MyMemory timeout')), 1500)) // 1.5초 타임아웃
+        new Promise<null>((_, reject) => setTimeout(() => reject(new Error('MyMemory timeout')), 1500))
       ]);
       
       if (myMemoryResult && myMemoryResult !== text) {
         const elapsed = Date.now() - startTime;
-        console.log(`⚡ MyMemory 번역 성공 (${elapsed}ms): ${myMemoryResult}`);
+        console.log(`⚡ MyMemory 고품질 번역 성공 (${elapsed}ms): ${myMemoryResult}`);
         this.saveToCache(text, sourceLang, targetLang, myMemoryResult);
         return myMemoryResult;
       }
     } catch (error) {
-      console.log('⚡ MyMemory 초고속 시도 실패, LibreTranslate로 진행');
+      console.log('⚡ MyMemory 실패, 다른 AI 서비스로 진행');
     }
 
     try {
-      // MyMemory 실패 시 빠른 폴백 번역 먼저 시도
-      console.log('🔄 빠른 폴백 번역 시도 (CORS 오류 대응)...');
-      const quickFallback = this.tryFallbackTranslation(text, sourceLang, targetLang);
-      if (quickFallback) {
+      // 🚀 2순위: Google Translate 고품질 AI 번역
+      console.log('🔄 Google Translate AI 번역 시도...');
+      const googleResult = await Promise.race([
+        this.translateWithGoogle(text, sourceLang, targetLang),
+        new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Google timeout')), 2000))
+      ]);
+      
+      if (googleResult && googleResult !== text) {
         const elapsed = Date.now() - startTime;
-        console.log(`✅ 빠른 폴백 번역 성공 (${elapsed}ms): "${quickFallback}"`);
-        this.saveToCache(text, sourceLang, targetLang, quickFallback);
-        return quickFallback;
+        console.log(`✅ Google 고품질 AI 번역 성공 (${elapsed}ms): ${googleResult}`);
+        this.saveToCache(text, sourceLang, targetLang, googleResult);
+        return googleResult;
       }
+    } catch (error) {
+      console.log('⚡ Google Translate 실패, Microsoft로 진행');
+    }
 
-      // LibreTranslate 서비스들 시도 (CORS 문제 있는 서버들 제거됨)
-      console.log('🔄 LibreTranslate 서비스 시도 중...');
+    try {
+      // 🚀 3순위: Microsoft Translator 고품질 AI 번역
+      console.log('🔄 Microsoft Translator AI 번역 시도...');
+      const microsoftResult = await Promise.race([
+        this.translateWithMicrosoft(text, sourceLang, targetLang),
+        new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Microsoft timeout')), 2000))
+      ]);
+      
+      if (microsoftResult && microsoftResult !== text) {
+        const elapsed = Date.now() - startTime;
+        console.log(`✅ Microsoft 고품질 AI 번역 성공 (${elapsed}ms): ${microsoftResult}`);
+        this.saveToCache(text, sourceLang, targetLang, microsoftResult);
+        return microsoftResult;
+      }
+    } catch (error) {
+      console.log('⚡ Microsoft Translator 실패, LibreTranslate로 진행');
+    }
+
+    try {
+      // 🚀 4순위: LibreTranslate AI 서비스들 (오픈소스 AI)
+      console.log('🔄 LibreTranslate AI 서비스들 시도...');
       const librePromises = this.services
         .filter(s => s.type === 'libretranslate')
         .map(service => this.translateWithLibre(service.url, text, sourceLang, targetLang));
@@ -359,7 +490,7 @@ export class FreeTranslationService {
           if (result.status === 'fulfilled') {
             if (result.value && result.value !== text) {
               const elapsed = Date.now() - startTime;
-              console.log(`✅ LibreTranslate 번역 성공 (${serviceUrl}, ${elapsed}ms): ${result.value}`);
+              console.log(`✅ LibreTranslate AI 번역 성공 (${serviceUrl}, ${elapsed}ms): ${result.value}`);
               this.saveToCache(text, sourceLang, targetLang, result.value);
               return result.value;
             } else {
@@ -372,21 +503,21 @@ export class FreeTranslationService {
       }
 
     } catch (error) {
-      console.error('🚨 번역 중 전체 오류 (CORS 포함):', error);
+      console.error('🚨 AI 번역 서비스들 전체 오류:', error);
     }
 
-    // 모든 API가 실패했을 때 폴백 번역 시도
-    console.log('🔄 폴백 번역 시도 중...');
+    // 🔄 최후 수단: 단순 폴백 번역 (정확도 낮음 - 기본 단어만)
+    console.log('🔄 모든 AI 서비스 실패 - 기본 단어 번역만 시도...');
     const fallbackResult = this.tryFallbackTranslation(text, sourceLang, targetLang);
     if (fallbackResult) {
       const elapsed = Date.now() - startTime;
-      console.log(`✅ 폴백 번역 성공 (${elapsed}ms): "${fallbackResult}"`);
+      console.log(`⚠️ 기본 단어 번역 사용 (${elapsed}ms): "${fallbackResult}" (AI 서비스 복구 필요)`);
       this.saveToCache(text, sourceLang, targetLang, fallbackResult);
       return fallbackResult;
     }
 
     const elapsed = Date.now() - startTime;
-    console.log(`❌ 모든 번역 서비스 및 폴백 실패 (${elapsed}ms), 원본 텍스트 반환: "${text}"`);
+    console.log(`❌ 모든 번역 방법 실패 (${elapsed}ms), 원본 텍스트 반환: "${text}"`);
     return text;
   }
 
