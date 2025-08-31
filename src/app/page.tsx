@@ -180,15 +180,7 @@ export default function Home() {
       status: isTranslating ? '번역 중' : '완료'
     };
     
-    // 1. syncService를 통한 localStorage 동기화
-    try {
-      syncService.updateData(updateData);
-      console.log('✅ syncService 업데이트 완료');
-    } catch (error) {
-      console.error('❌ syncService 업데이트 실패:', error);
-    }
-
-    // 2. API 서버에 데이터 전송 (OBS용) - 재시도 로직 포함
+    // 🚀 1. OBS 오버레이 우선순위: API 서버에 데이터 전송 (가장 먼저 실행)
     const sendToAPI = async () => {
       try {
         if (!sessionId) {
@@ -209,7 +201,7 @@ export default function Home() {
         
         if (response.ok) {
           const result = await response.json();
-          console.log('📡 API 전송 성공:', result);
+          console.log('🎯 OBS 우선순위 - API 전송 성공:', result);
           return true;
         } else {
           console.warn('⚠️ API 전송 실패:', response.status);
@@ -221,11 +213,11 @@ export default function Home() {
       }
     };
 
-    // 최대 2번 재시도
+    // 🎯 OBS 오버레이에 최우선으로 전송 (번역 품질 영향 없음)
     let success = await sendToAPI();
     if (!success && updateData.translatedText) { // 번역된 텍스트가 있을 때만 재시도
-      console.log('🔄 API 전송 재시도...');
-      await new Promise(resolve => setTimeout(resolve, 200)); // 200ms 대기
+      console.log('🔄 OBS 우선순위 - API 전송 재시도...');
+      await new Promise(resolve => setTimeout(resolve, 100)); // 100ms로 단축 (더 빠르게)
       success = await sendToAPI();
       
       if (!success) {
@@ -233,19 +225,25 @@ export default function Home() {
       }
     }
 
-    // 3. PostMessage를 통한 브로드캐스트 (브라우저 호환성) - 중복 방지 로직 포함
+    // 2. syncService를 통한 localStorage 동기화 (브라우저 미리보기용)
+    try {
+      syncService.updateData(updateData);
+      console.log('✅ 브라우저 미리보기 - syncService 업데이트 완료');
+    } catch (error) {
+      console.error('❌ syncService 업데이트 실패:', error);
+    }
+
+    // 🚀 3. PostMessage 우선순위 전송 (OBS 오버레이 iframe 먼저)
     try {
       const postMessageData = {
         type: 'SUBTITLE_UPDATE',
         ...updateData,
         timestamp: Date.now(),
-        dataHash // 중복 감지를 위한 해시 추가
+        dataHash, // 중복 감지를 위한 해시 추가
+        priority: 'OBS_OVERLAY' // 우선순위 표시
       };
       
-      // 모든 프레임에 메시지 전송
-      window.postMessage(postMessageData, '*');
-      
-      // 만약 iframe이 있다면 그것들에도 전송
+      // 🎯 1순위: iframe에 먼저 전송 (OBS 오버레이 타겟)
       const iframes = document.querySelectorAll('iframe');
       iframes.forEach(iframe => {
         try {
@@ -255,7 +253,19 @@ export default function Home() {
         }
       });
       
-      console.log('📡 PostMessage 브로드캐스트 완료');
+      // 🎯 2순위: 부모 창에 전송 (OBS가 부모 창에서 iframe으로 로드한 경우)
+      if (window.parent !== window) {
+        try {
+          window.parent.postMessage(postMessageData, '*');
+        } catch (e) {
+          // Cross-origin 제한으로 인한 에러는 무시
+        }
+      }
+      
+      // 3순위: 현재 창에 브로드캐스트 (브라우저 미리보기)
+      window.postMessage(postMessageData, '*');
+      
+      console.log('🎯 OBS 우선순위 - PostMessage 브로드캐스트 완료');
     } catch (error) {
       console.error('❌ PostMessage 전송 실패:', error);
     }
@@ -326,13 +336,16 @@ export default function Home() {
           !translated.includes('undefined') && 
           !translated.includes('null')) {
         
-        // 로컬 상태 업데이트 (동기화)
-        setOriginalText(completeSentence);
-        setTranslatedText(translated);
-        
-        // 자동 분할 번역 완료 후에만 API 전솤
-        console.log('📡 자동 분할 번역 결과 전송:', { completeSentence, translated });
+        // OBS 우선순위 - API 먼저 전송
+        console.log('📡 OBS 우선순위 - 자동 분할 번역 결과 전송:', { completeSentence, translated });
         updateSubtitles(completeSentence, translated, isListening, false);
+        
+        // 브라우저 UI 업데이트는 지연 (OBS가 먼저 표시되도록)
+        setTimeout(() => {
+          setOriginalText(completeSentence);
+          setTranslatedText(translated);
+          console.log('🖥️ 브라우저 자동분할 UI 업데이트 완료 (OBS 후순위)');
+        }, 40); // 40ms 지연
       } else {
         // 번역 품질 문제시 전송 안함 (깜빡임 방지)
         console.log('⚠️ 자동 분할 번역 품질 문제로 전송 건너뛰기');
@@ -385,9 +398,14 @@ export default function Home() {
       // 음성 인식 서비스 초기화
       webSpeechService.onResult((text: string) => {
         console.log('🎤 최종 음성 인식 결과:', text);
-        setOriginalText(text);
-        setStatus('번역 중...');
-        setIsTranslating(true);
+        
+        // 브라우저 UI 업데이트를 약간 지연 (OBS 우선순위 보장)
+        setTimeout(() => {
+          setOriginalText(text);
+          setStatus('번역 중...');
+          setIsTranslating(true);
+          console.log('🖥️ 브라우저 원본 텍스트 표시 (OBS 후순위)');
+        }, 30); // 30ms 지연
         
         // 중간 번역 타이머 및 처리 중단
         if (translationTimer) {
@@ -413,13 +431,17 @@ export default function Home() {
                 !translated.includes('undefined') && 
                 !translated.includes('null')) {
               
-              setTranslatedText(translated);
-              setIsTranslating(false);
-              setStatus('번역 완료');
-              
-              // ✅ 최종 번역 결과 전송 (최고 우선순위)
-              console.log('🏆 최종 번역 결과 전송:', { text, translated });
+              // ✅ 최종 번역 결과를 OBS에 먼저 전송 (최고 우선순위)
+              console.log('🏆 OBS 우선순위 - 최종 번역 결과 전송:', { text, translated });
               updateSubtitles(text, translated, isListening, false);
+              
+              // 브라우저 UI 업데이트는 지연 (OBS가 먼저 표시되도록)
+              setTimeout(() => {
+                setTranslatedText(translated);
+                setIsTranslating(false);
+                setStatus('번역 완료');
+                console.log('🖥️ 브라우저 UI 업데이트 완료 (OBS 후순위)');
+              }, 50); // 50ms 지연으로 OBS가 먼저 표시되게
             } else {
               // 번역 품질 문제시 원본만 표시
               console.log('⚠️ 최종 번역 품질 문제로 원본만 표시:', translated);
