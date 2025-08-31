@@ -1,0 +1,335 @@
+// Whisper 기반 고품질 음성인식 서비스 (브라우저 전용)
+// 서버 사이드에서는 import하지 않음
+let pipeline: any = null;
+
+// 브라우저에서만 동적으로 import
+const loadTransformers = async () => {
+  if (typeof window === 'undefined') return null;
+  if (pipeline) return pipeline;
+  
+  const transformers = await import('@xenova/transformers');
+  pipeline = transformers.pipeline;
+  return pipeline;
+};
+
+interface WhisperConfig {
+  model: 'whisper-tiny' | 'whisper-base' | 'whisper-small';
+  language?: string;
+  chunkDuration: number; // 실시간 처리 간격 (밀리초)
+}
+
+export class WhisperSpeechService {
+  private transcriber: any = null;
+  private isInitialized = false;
+  private mediaRecorder: MediaRecorder | null = null;
+  private stream: MediaStream | null = null;
+  private isListening = false;
+  private shouldRestart = true;
+  
+  // 설정
+  private config: WhisperConfig = {
+    model: 'whisper-base',  // 74MB - 품질과 속도의 균형
+    chunkDuration: 2000     // 2초마다 처리
+  };
+  
+  // 콜백 함수들 (기존 Web Speech API와 동일한 인터페이스)
+  private onResultCallback: ((text: string) => void) | null = null;
+  private onInterimResultCallback: ((text: string) => void) | null = null;
+  private onErrorCallback: ((error: string) => void) | null = null;
+  private onStatusCallback: ((status: string) => void) | null = null;
+  private onEndCallback: (() => void) | null = null;
+
+  constructor(config?: Partial<WhisperConfig>) {
+    if (config) {
+      this.config = { ...this.config, ...config };
+    }
+    console.log('🎙️ Whisper Speech Service 초기화:', this.config);
+  }
+
+  // 기존 Web Speech API와 동일한 인터페이스
+  onResult(callback: (text: string) => void) {
+    this.onResultCallback = callback;
+  }
+
+  onInterimResult(callback: (text: string) => void) {
+    this.onInterimResultCallback = callback;
+  }
+
+  onError(callback: (error: string) => void) {
+    this.onErrorCallback = callback;
+  }
+
+  onStatus(callback: (status: string) => void) {
+    this.onStatusCallback = callback;
+  }
+
+  onEnd(callback: () => void) {
+    this.onEndCallback = callback;
+  }
+
+  async initialize(): Promise<boolean> {
+    if (this.isInitialized) return true;
+    if (typeof window === 'undefined') {
+      console.warn('⚠️ Whisper는 브라우저에서만 작동합니다');
+      return false;
+    }
+
+    try {
+      this.updateStatus('AI 음성인식 모델 준비 중...');
+      console.log('🚀 Whisper 모델 로딩 시작:', `openai/${this.config.model}`);
+
+      // 동적으로 transformers 로드
+      const pipelineFunc = await loadTransformers();
+      if (!pipelineFunc) {
+        throw new Error('Transformers 라이브러리 로딩 실패');
+      }
+
+      // 진행률 표시와 함께 모델 로드
+      let lastPercent = 0;
+      this.transcriber = await pipelineFunc(
+        'automatic-speech-recognition',
+        `openai/${this.config.model}`,
+        {
+          dtype: 'fp32',  // 호환성을 위해 fp32 사용
+          device: 'webgpu', // GPU 가속 시도, 실패시 자동으로 WASM으로 fallback
+          progress_callback: (progress: any) => {
+            if (progress.status === 'downloading') {
+              const percent = Math.round(progress.progress * 100);
+              if (percent > lastPercent) {
+                lastPercent = percent;
+                this.updateStatus(`AI 모델 다운로드: ${percent}%`);
+                console.log(`📥 모델 다운로드: ${percent}%`);
+              }
+            } else if (progress.status === 'loading') {
+              this.updateStatus('AI 모델 로딩 중...');
+            }
+          }
+        }
+      );
+
+      this.isInitialized = true;
+      this.updateStatus('🤖 AI 음성인식 준비 완료');
+      console.log('✅ Whisper 모델 로딩 완료');
+      return true;
+
+    } catch (error) {
+      console.error('❌ Whisper 초기화 실패:', error);
+      this.handleError(`AI 모델 로딩 실패: ${error}`);
+      return false;
+    }
+  }
+
+  async start(language: string = 'ko-KR'): Promise<boolean> {
+    try {
+      // Whisper 모델 초기화
+      if (!this.isInitialized) {
+        const success = await this.initialize();
+        if (!success) return false;
+      }
+
+      this.shouldRestart = true;
+      this.updateStatus('마이크 권한 요청 중...');
+
+      // 마이크 권한 요청 및 스트림 생성
+      this.stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          sampleRate: 16000,      // Whisper 최적 샘플레이트
+          channelCount: 1,        // 모노 오디오
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        } 
+      });
+
+      // MediaRecorder 설정
+      const mimeType = this.getSupportedMimeType();
+      this.mediaRecorder = new MediaRecorder(this.stream, { mimeType });
+
+      const audioChunks: BlobPart[] = [];
+
+      this.mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunks.push(event.data);
+        }
+      };
+
+      this.mediaRecorder.onstop = async () => {
+        if (audioChunks.length > 0 && this.isListening) {
+          const audioBlob = new Blob(audioChunks, { type: mimeType });
+          await this.processAudioChunk(audioBlob);
+          audioChunks.length = 0; // 배열 초기화
+        }
+      };
+
+      this.mediaRecorder.onerror = (event: any) => {
+        console.error('MediaRecorder 오류:', event.error);
+        this.handleError(`녹음 오류: ${event.error}`);
+      };
+
+      // 실시간 처리를 위한 주기적 데이터 수집
+      this.mediaRecorder.start(this.config.chunkDuration);
+      this.isListening = true;
+      this.updateStatus('🎤 AI 음성인식 활성 (Whisper)');
+      
+      console.log('🎙️ Whisper 음성인식 시작');
+      return true;
+
+    } catch (error) {
+      console.error('❌ 음성인식 시작 실패:', error);
+      this.handleError(`음성인식 시작 실패: ${error}`);
+      return false;
+    }
+  }
+
+  stop() {
+    try {
+      this.shouldRestart = false;
+      
+      if (this.mediaRecorder && this.isListening) {
+        this.mediaRecorder.stop();
+        this.isListening = false;
+      }
+
+      if (this.stream) {
+        this.stream.getTracks().forEach(track => track.stop());
+        this.stream = null;
+      }
+
+      this.updateStatus('AI 음성인식 중지됨');
+      console.log('🛑 Whisper 음성인식 중지');
+
+      if (this.onEndCallback) {
+        this.onEndCallback();
+      }
+
+    } catch (error) {
+      console.error('❌ 음성인식 중지 중 오류:', error);
+      this.handleError(`음성인식 중지 실패: ${error}`);
+    }
+  }
+
+  private async processAudioChunk(audioBlob: Blob) {
+    try {
+      if (!this.transcriber || !this.isListening) return;
+
+      console.log('🔄 Whisper 오디오 처리:', audioBlob.size, 'bytes');
+      this.updateStatus('🧠 AI 음성 분석 중...');
+
+      // 오디오 데이터를 ArrayBuffer로 변환
+      const arrayBuffer = await audioBlob.arrayBuffer();
+      
+      // Whisper로 음성 → 텍스트 변환
+      const startTime = Date.now();
+      const result = await this.transcriber(arrayBuffer, {
+        language: 'korean', // 한국어 우선 인식
+        task: 'transcribe'
+      });
+      
+      const processingTime = Date.now() - startTime;
+      const transcription = result.text?.trim();
+      
+      if (transcription && transcription.length > 0) {
+        console.log(`✅ Whisper 인식 성공 (${processingTime}ms):`, transcription);
+        this.updateStatus('🎤 AI 음성인식 활성 (Whisper)');
+        
+        // 중간 결과와 최종 결과 모두 제공
+        if (this.onInterimResultCallback) {
+          this.onInterimResultCallback(transcription);
+        }
+        
+        if (this.onResultCallback) {
+          this.onResultCallback(transcription);
+        }
+      } else {
+        console.log('🔇 Whisper: 인식된 음성 없음');
+      }
+
+      // 계속 녹음 중이면 다음 청크 시작
+      if (this.isListening && this.shouldRestart) {
+        setTimeout(() => {
+          if (this.mediaRecorder && this.mediaRecorder.state === 'inactive') {
+            this.mediaRecorder.start(this.config.chunkDuration);
+          }
+        }, 100);
+      }
+
+    } catch (error) {
+      console.error('❌ Whisper 오디오 처리 실패:', error);
+      this.handleError(`AI 음성 분석 실패: ${error}`);
+      
+      // 오류 발생시에도 자동 재시작 시도 (네트워크 독립적)
+      if (this.isListening && this.shouldRestart) {
+        console.log('🔄 Whisper 자동 재시작 시도...');
+        setTimeout(() => {
+          if (this.mediaRecorder && this.mediaRecorder.state === 'inactive') {
+            this.mediaRecorder.start(this.config.chunkDuration);
+          }
+        }, 1000);
+      }
+    }
+  }
+
+  private getSupportedMimeType(): string {
+    const types = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/mp4',
+      'audio/wav'
+    ];
+    
+    for (const type of types) {
+      if (MediaRecorder.isTypeSupported(type)) {
+        console.log('📱 지원되는 MIME 타입:', type);
+        return type;
+      }
+    }
+    
+    console.warn('⚠️ 지원되는 MIME 타입을 찾을 수 없음, 기본값 사용');
+    return 'audio/webm';
+  }
+
+  private updateStatus(status: string) {
+    if (this.onStatusCallback) {
+      this.onStatusCallback(status);
+    }
+  }
+
+  private handleError(error: string) {
+    console.error('🚨 Whisper 오류:', error);
+    if (this.onErrorCallback) {
+      this.onErrorCallback(error);
+    }
+  }
+
+  // 정리 함수
+  destroy() {
+    this.stop();
+    this.transcriber = null;
+    this.isInitialized = false;
+    this.onResultCallback = null;
+    this.onInterimResultCallback = null;
+    this.onErrorCallback = null;
+    this.onStatusCallback = null;
+    this.onEndCallback = null;
+    console.log('🧹 Whisper Speech Service 정리 완료');
+  }
+
+  // 설정 변경
+  updateConfig(newConfig: Partial<WhisperConfig>) {
+    this.config = { ...this.config, ...newConfig };
+    console.log('⚙️ Whisper 설정 업데이트:', this.config);
+  }
+
+  // 모델 상태 확인
+  isModelReady(): boolean {
+    return this.isInitialized && this.transcriber !== null;
+  }
+
+  // 현재 설정 반환
+  getConfig(): WhisperConfig {
+    return { ...this.config };
+  }
+}
+
+// 전역 인스턴스 생성 (기존 webSpeechService와 동일한 패턴)
+export const whisperSpeechService = new WhisperSpeechService();

@@ -37,6 +37,44 @@ const nextConfig = {
     optimizePackageImports: ['react', 'react-dom'],
     serverComponentsExternalPackages: []
   },
+
+  // Whisper.js 지원을 위한 webpack 설정
+  webpack: (config, { isServer }) => {
+    // 브라우저 전용 설정
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        path: false,
+        crypto: false,
+        stream: false,
+        buffer: false,
+      };
+
+      // Node.js 전용 패키지 제외
+      config.externals = config.externals || [];
+      config.externals.push({
+        'onnxruntime-node': 'commonjs onnxruntime-node'
+      });
+    }
+
+    // WASM 및 WebAssembly 지원
+    config.experiments = {
+      ...config.experiments,
+      asyncWebAssembly: true,
+      layers: true,
+    };
+
+    // .node 파일 무시 (브라우저에서 불필요)
+    config.module = config.module || {};
+    config.module.rules = config.module.rules || [];
+    config.module.rules.push({
+      test: /\.node$/,
+      use: 'ignore-loader'
+    });
+
+    return config;
+  },
   
   // 캐싱 최적화
   onDemandEntries: {
