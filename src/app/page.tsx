@@ -468,13 +468,28 @@ export default function Home() {
             }
           })
           .catch((error) => {
-            console.error('번역 오류:', error);
-            setError('번역에 실패했습니다.');
-            setIsTranslating(false);
-            setStatus('번역 실패');
+            console.error('❌ 번역 오류 (음성인식은 유지):', error);
             
-            // 오류 상태도 updateSubtitles로 통합 처리
-            updateSubtitles(text, '', isListening, false);
+            // 번역 실패해도 원본 텍스트는 표시하고 음성인식은 계속 유지
+            console.log('📝 번역 실패 - 원본 텍스트만 표시하고 음성인식 계속');
+            
+            // OBS에 원본 텍스트라도 전송 (번역 실패를 알리는 표시 추가)
+            updateSubtitles(text, `[번역실패] ${text}`, isListening, false).then(() => {
+              // 브라우저 UI는 지연 업데이트
+              setTimeout(() => {
+                setTranslatedText(''); // 번역 텍스트는 비우기
+                setIsTranslating(false);
+                setStatus('번역 실패 - 음성인식 계속');
+                setError('번역 서비스 연결 문제 (음성인식은 계속 진행)');
+                console.log('🖥️ 번역실패 브라우저 UI 업데이트 완료');
+              }, 100);
+            }).catch(() => {
+              // API 전송도 실패한 경우에만 브라우저만 업데이트
+              setTranslatedText('');
+              setIsTranslating(false);
+              setStatus('번역 및 API 실패');
+              setError('서비스 연결 문제');
+            });
           });
       });
 

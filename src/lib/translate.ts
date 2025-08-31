@@ -1,11 +1,10 @@
 // 무료 번역 서비스 (최적화된 속도)
 export class FreeTranslationService {
+  // CORS 문제가 있는 서버들 제거하고 안정적인 서비스만 사용
   private services = [
     { url: 'https://api.mymemory.translated.net/get', type: 'mymemory' },
-    { url: 'https://libretranslate.com/translate', type: 'libretranslate' },
-    { url: 'https://translate.fedilab.app/translate', type: 'libretranslate' },
-    { url: 'https://libretranslate.de/translate', type: 'libretranslate' },
-    { url: 'https://translate.terraprint.co/translate', type: 'libretranslate' }
+    { url: 'https://libretranslate.com/translate', type: 'libretranslate' } // 400 오류는 있지만 CORS는 통과
+    // CORS 문제로 제거: libretranslate.de, translate.fedilab.app, translate.terraprint.co
   ];
   
   private cache = new Map<string, {translation: string, timestamp: number}>();
@@ -14,23 +13,74 @@ export class FreeTranslationService {
   private lastApiCall = 0;
   private readonly MIN_API_INTERVAL = 20; // 초고속 응답: 20ms
   
-  // 간단한 폴백 번역 (키워드 기반)
+  // 확장된 폴백 번역 (키워드 기반) - CORS 오류 대응
   private fallbackTranslations: { [key: string]: { [key: string]: { [key: string]: string } } } = {
     'ko': {
       'en': {
+        // 기본 인사말
         '안녕하세요': 'Hello',
+        '안녕': 'Hi',
         '감사합니다': 'Thank you',
+        '고맙습니다': 'Thank you',
         '죄송합니다': 'Sorry',
+        '미안합니다': 'Sorry',
+        '실례합니다': 'Excuse me',
+        '안녕히 가세요': 'Goodbye',
+        '잘가요': 'Bye',
+        
+        // 기본 응답
         '네': 'Yes',
+        '예': 'Yes', 
         '아니요': 'No',
+        '아니에요': 'No',
+        '맞아요': 'That\'s right',
+        '틀려요': 'That\'s wrong',
+        '모르겠어요': 'I don\'t know',
+        '알겠습니다': 'I understand',
+        
+        // 감정 표현
         '좋아요': 'Good',
+        '좋다': 'Good',
+        '나빠요': 'Bad',
+        '나쁘다': 'Bad',
         '괜찮아요': 'It\'s okay',
+        '괜찮다': 'It\'s okay',
+        '기뻐요': 'I\'m happy',
+        '슬퍼요': 'I\'m sad',
+        '화나요': 'I\'m angry',
+        '놀라워요': 'Amazing',
+        
+        // 일상 표현
         '맛있어요': 'Delicious',
         '맛있다': 'Delicious',
-        '좋다': 'Good',
-        '나쁘다': 'Bad',
+        '맛없어요': 'Not tasty',
+        '뜨거워요': 'It\'s hot',
+        '차가워요': 'It\'s cold',
         '크다': 'Big',
-        '작다': 'Small'
+        '작다': 'Small',
+        '빨라요': 'Fast',
+        '느려요': 'Slow',
+        
+        // 질문/요청
+        '뭐예요': 'What is it?',
+        '어디예요': 'Where is it?',
+        '언제예요': 'When is it?',
+        '왜요': 'Why?',
+        '어떻게': 'How?',
+        '도와주세요': 'Please help me',
+        '기다려주세요': 'Please wait',
+        
+        // 자주 사용되는 단어들
+        '물': 'water',
+        '밥': 'rice/food', 
+        '집': 'house',
+        '학교': 'school',
+        '회사': 'company',
+        '친구': 'friend',
+        '가족': 'family',
+        '시간': 'time',
+        '돈': 'money',
+        '일': 'work'
       }
     }
   };
@@ -283,35 +333,46 @@ export class FreeTranslationService {
     }
 
     try {
+      // MyMemory 실패 시 빠른 폴백 번역 먼저 시도
+      console.log('🔄 빠른 폴백 번역 시도 (CORS 오류 대응)...');
+      const quickFallback = this.tryFallbackTranslation(text, sourceLang, targetLang);
+      if (quickFallback) {
+        const elapsed = Date.now() - startTime;
+        console.log(`✅ 빠른 폴백 번역 성공 (${elapsed}ms): "${quickFallback}"`);
+        this.saveToCache(text, sourceLang, targetLang, quickFallback);
+        return quickFallback;
+      }
 
-      // MyMemory 실패 시 LibreTranslate 서비스들을 병렬 시도
-      console.log('🔄 LibreTranslate 서비스들 시도 중...');
+      // LibreTranslate 서비스들 시도 (CORS 문제 있는 서버들 제거됨)
+      console.log('🔄 LibreTranslate 서비스 시도 중...');
       const librePromises = this.services
         .filter(s => s.type === 'libretranslate')
         .map(service => this.translateWithLibre(service.url, text, sourceLang, targetLang));
 
-      const results = await Promise.allSettled(librePromises);
-      
-      for (let i = 0; i < results.length; i++) {
-        const result = results[i];
-        const serviceUrl = this.services.filter(s => s.type === 'libretranslate')[i]?.url;
+      if (librePromises.length > 0) {
+        const results = await Promise.allSettled(librePromises);
         
-        if (result.status === 'fulfilled') {
-          if (result.value && result.value !== text) {
-            const elapsed = Date.now() - startTime;
-            console.log(`✅ LibreTranslate 번역 성공 (${serviceUrl}, ${elapsed}ms): ${result.value}`);
-            this.saveToCache(text, sourceLang, targetLang, result.value);
-            return result.value;
+        for (let i = 0; i < results.length; i++) {
+          const result = results[i];
+          const serviceUrl = this.services.filter(s => s.type === 'libretranslate')[i]?.url;
+          
+          if (result.status === 'fulfilled') {
+            if (result.value && result.value !== text) {
+              const elapsed = Date.now() - startTime;
+              console.log(`✅ LibreTranslate 번역 성공 (${serviceUrl}, ${elapsed}ms): ${result.value}`);
+              this.saveToCache(text, sourceLang, targetLang, result.value);
+              return result.value;
+            } else {
+              console.log(`❌ LibreTranslate 번역 실패 또는 동일한 텍스트 (${serviceUrl}):`, result.value);
+            }
           } else {
-            console.log(`❌ LibreTranslate 번역 실패 또는 동일한 텍스트 (${serviceUrl}):`, result.value);
+            console.log(`❌ LibreTranslate CORS/네트워크 오류 (${serviceUrl}):`, result.reason);
           }
-        } else {
-          console.log(`❌ LibreTranslate 오류 (${serviceUrl}):`, result.reason);
         }
       }
 
     } catch (error) {
-      console.error('🚨 번역 중 전체 오류:', error);
+      console.error('🚨 번역 중 전체 오류 (CORS 포함):', error);
     }
 
     // 모든 API가 실패했을 때 폴백 번역 시도
