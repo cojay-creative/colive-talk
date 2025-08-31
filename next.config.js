@@ -49,13 +49,27 @@ const nextConfig = {
         crypto: false,
         stream: false,
         buffer: false,
+        util: false,
+        url: false,
+        querystring: false,
       };
 
-      // Node.js 전용 패키지 제외
+      // Node.js 전용 패키지 완전 제외
       config.externals = config.externals || [];
       config.externals.push({
-        'onnxruntime-node': 'commonjs onnxruntime-node'
+        'onnxruntime-node': 'commonjs onnxruntime-node',
+        'onnxruntime-common': 'commonjs onnxruntime-common'
       });
+
+      // 글로벌 변수 정의 (require 문제 해결)
+      const webpack = require('webpack');
+      config.plugins = config.plugins || [];
+      config.plugins.push(
+        new webpack.DefinePlugin({
+          global: 'globalThis',
+          'global.XENOVA_TRANSFORMERS_ENV': JSON.stringify('browser'),
+        })
+      );
     }
 
     // WASM 및 WebAssembly 지원
@@ -65,13 +79,19 @@ const nextConfig = {
       layers: true,
     };
 
-    // .node 파일 무시 (브라우저에서 불필요)
+    // .node 파일과 네이티브 바이너리 무시
     config.module = config.module || {};
     config.module.rules = config.module.rules || [];
-    config.module.rules.push({
-      test: /\.node$/,
-      use: 'ignore-loader'
-    });
+    config.module.rules.push(
+      {
+        test: /\.node$/,
+        use: 'ignore-loader'
+      },
+      {
+        test: /\.(wasm)$/,
+        type: 'webassembly/async',
+      }
+    );
 
     return config;
   },

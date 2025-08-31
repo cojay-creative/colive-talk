@@ -7,9 +7,26 @@ const loadTransformers = async () => {
   if (typeof window === 'undefined') return null;
   if (pipeline) return pipeline;
   
-  const transformers = await import('@xenova/transformers');
-  pipeline = transformers.pipeline;
-  return pipeline;
+  try {
+    // 환경 변수 설정으로 브라우저 모드 강제
+    if (typeof globalThis !== 'undefined') {
+      globalThis.XENOVA_TRANSFORMERS_ENV = 'browser';
+    }
+    
+    const transformers = await import('@xenova/transformers');
+    
+    // 환경 설정 확인
+    if (transformers.env) {
+      transformers.env.backends.onnx.wasm.numThreads = 1;
+      transformers.env.backends.onnx.wasm.simd = true;
+    }
+    
+    pipeline = transformers.pipeline;
+    return pipeline;
+  } catch (error) {
+    console.error('❌ Transformers 로딩 실패:', error);
+    throw new Error(`Transformers 라이브러리 로딩 실패: ${error}`);
+  }
 };
 
 interface WhisperConfig {

@@ -5,7 +5,8 @@ import ErrorBoundary from '../components/ErrorBoundary';
 import Header from '../components/Header';
 import Sidebar from '../components/Sidebar';
 // import { webSpeechService } from '../lib/speech';
-import { whisperSpeechService as webSpeechService } from '../lib/whisper-speech'; // Whisper로 교체
+// import { whisperSpeechService as webSpeechService } from '../lib/whisper-speech'; // Whisper로 교체
+import { hybridSpeechService as webSpeechService } from '../lib/hybrid-speech'; // 하이브리드 서비스 (Whisper + 폴백)
 import { freeTranslationService } from '../lib/translate';
 import { syncService } from '../lib/sync';
 
@@ -875,12 +876,14 @@ export default function Home() {
 
               {/* 마이크 설정 */}
               <div className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg p-4 shadow-sm border transition-all duration-300`}>
-                <h3 className={`text-lg font-bold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>🤖 AI 음성인식 (Whisper)</h3>
-                <div className="mb-4 p-3 rounded-lg bg-blue-50 border-l-4 border-blue-400">
+                <h3 className={`text-lg font-bold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>🔄 스마트 음성인식</h3>
+                <div className="mb-4 p-3 rounded-lg bg-gradient-to-r from-blue-50 to-green-50 border-l-4 border-blue-400">
                   <p className="text-sm text-blue-700">
-                    <strong>🚀 OpenAI Whisper 모델</strong> 사용 - 99개 언어 지원, 최고 품질 인식
+                    <strong>🤖 AI 우선 모드</strong> - Whisper AI 시도 → 기본 음성인식으로 자동 폴백
                     {!isListening && (
-                      <span className="block mt-1 text-blue-600">첫 사용시 AI 모델 다운로드가 필요합니다 (~30초)</span>
+                      <span className="block mt-1 text-blue-600">
+                        AI 사용 가능 시: 99개 언어, 최고 품질 | 폴백: 빠른 시작, 안정적
+                      </span>
                     )}
                   </p>
                 </div>
