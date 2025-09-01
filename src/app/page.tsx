@@ -4,9 +4,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import ErrorBoundary from '../components/ErrorBoundary';
 import Header from '../components/Header';
 import Sidebar from '../components/Sidebar';
-// import { webSpeechService } from '../lib/speech';
+import { webSpeechService } from '../lib/speech';
 // import { whisperSpeechService as webSpeechService } from '../lib/whisper-speech'; // Whisper로 교체
-import { hybridSpeechService as webSpeechService } from '../lib/hybrid-speech'; // 하이브리드 서비스 (Whisper + 폴백)
+// import { hybridSpeechService as webSpeechService } from '../lib/hybrid-speech'; // 하이브리드 서비스 (Whisper + 폴백)
 import { freeTranslationService } from '../lib/translate';
 import { syncService } from '../lib/sync';
 

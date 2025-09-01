@@ -48,10 +48,15 @@ const nextConfig = {
         path: false,
         crypto: false,
         stream: false,
-        buffer: false,
+        buffer: require.resolve('buffer'),
+        process: require.resolve('process/browser'),
         util: false,
         url: false,
         querystring: false,
+        os: false,
+        child_process: false,
+        worker_threads: false,
+        perf_hooks: false,
       };
 
       // Node.js 전용 패키지 완전 제외
@@ -68,6 +73,10 @@ const nextConfig = {
         new webpack.DefinePlugin({
           global: 'globalThis',
           'global.XENOVA_TRANSFORMERS_ENV': JSON.stringify('browser'),
+        }),
+        new webpack.ProvidePlugin({
+          process: 'process/browser',
+          Buffer: ['buffer', 'Buffer'],
         })
       );
     }
