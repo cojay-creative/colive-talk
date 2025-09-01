@@ -15,6 +15,7 @@ const loadTransformers = async () => {
   
   try {
     console.log('🚀 Transformers 라이브러리 로딩 시작...');
+    console.log('🔍 네트워크 상태:', navigator.onLine ? '온라인' : '오프라인');
     
     // 브라우저 환경 강제 설정
     if (typeof globalThis !== 'undefined') {
@@ -23,8 +24,9 @@ const loadTransformers = async () => {
     }
     
     // 동적 import 시도
+    console.log('📦 @xenova/transformers 패키지 임포트 중...');
     const transformers = await import('@xenova/transformers');
-    console.log('✅ @xenova/transformers 라이브러리 로드 성공');
+    console.log('✅ @xenova/transformers 라이브러리 로드 성공:', typeof transformers);
     
     // WASM 백엔드 최적화 설정
     if (transformers.env && transformers.env.backends) {
@@ -72,9 +74,9 @@ export class WhisperSpeechService {
   private isListening = false;
   private shouldRestart = true;
   
-  // 설정
+  // 설정 (더 작은 모델로 시작)
   private config: WhisperConfig = {
-    model: 'whisper-base',  // 74MB - 품질과 속도의 균형
+    model: 'whisper-tiny',  // 39MB - 빠른 로딩, 기본 품질
     chunkDuration: 2000     // 2초마다 처리
   };
   
@@ -124,17 +126,32 @@ export class WhisperSpeechService {
       return false;
     }
 
+    // 브라우저 호환성 확인
+    console.log('🔍 브라우저 환경 확인:', {
+      userAgent: navigator.userAgent,
+      onLine: navigator.onLine,
+      webAssembly: typeof WebAssembly !== 'undefined',
+      mediaDevices: !!navigator.mediaDevices,
+      mediaRecorder: typeof MediaRecorder !== 'undefined'
+    });
+
     try {
       this.updateStatus('🤖 AI 음성인식 모델 준비 중...');
       console.log('🚀 Whisper 모델 로딩 시작:', `openai/${this.config.model}`);
 
-      // Transformers 라이브러리 로드
-      const pipelineFunc = await loadTransformers();
+      // Transformers 라이브러리 로드 (타임아웃 적용)
+      console.log('⏳ Transformers 라이브러리 로드 중... (최대 30초 대기)');
+      const transformersPromise = loadTransformers();
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Transformers 라이브러리 로딩 시간 초과 (30초)')), 30000);
+      });
+      
+      const pipelineFunc = await Promise.race([transformersPromise, timeoutPromise]);
       if (!pipelineFunc) {
         throw new Error('Transformers 파이프라인 함수 없음');
       }
 
-      console.log('🎯 AI 모델 다운로드 시작...');
+      console.log('🎯 AI 모델 다운로드 시작... (whisper-tiny - 39MB)');
       
       // 진행률 표시와 함께 모델 로드
       let lastPercent = 0;
