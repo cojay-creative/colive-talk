@@ -10,6 +10,9 @@ const userSessions = new Map<string, {
   lastActivity: number;
 }>();
 
+// Edge Requests 절약을 위한 중복 방지 캐시
+const requestCache = new Map<string, { data: any, timestamp: number }>();
+
 // 5분 이상 비활성 세션 정리
 const CLEANUP_INTERVAL = 5 * 60 * 1000; // 5분
 const cleanupInactiveSessions = () => {
@@ -74,6 +77,27 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
     
+    // Edge Requests 절약을 위한 서버 사이드 중복 방지
+    const cacheKey = `${sessionId}_${subtitleData.originalText || ''}_${subtitleData.translatedText || ''}_${subtitleData.isListening}`;
+    const cached = requestCache.get(cacheKey);
+    
+    // 동일한 데이터가 2초 이내에 들어온 경우 무시 (Edge Requests 절약)
+    if (cached && (Date.now() - cached.timestamp) < 2000) {
+      console.log('🚫 서버 중복 방지 (Edge Requests 절약):', cacheKey);
+      return NextResponse.json({
+        success: true,
+        cached: true,
+        message: 'Duplicate request ignored',
+        data: cached.data
+      }, {
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type',
+        }
+      });
+    }
+    
     const newData = {
       originalText: subtitleData.originalText || '',
       translatedText: subtitleData.translatedText || '',
@@ -82,6 +106,15 @@ export async function POST(request: NextRequest) {
       timestamp: Date.now(),
       lastActivity: Date.now()
     };
+    
+    // 캐시 업데이트 (Edge Requests 절약)
+    requestCache.set(cacheKey, { data: newData, timestamp: Date.now() });
+    
+    // 캐시 크기 제한 (메모리 절약)
+    if (requestCache.size > 100) {
+      const oldestKey = requestCache.keys().next().value;
+      requestCache.delete(oldestKey);
+    }
     
     userSessions.set(sessionId, newData);
     

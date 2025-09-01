@@ -137,9 +137,9 @@ export default function Home() {
     const dataHash = `${originalText}_${translatedText}_${isListening}`;
     const lastHash = `${lastSentData.originalText}_${lastSentData.translatedText}_${lastSentData.isListening}`;
     
-    // 동일한 데이터이고 지난 전송 후 0.5초가 지나지 않았으면 건너뛰기
-    if (dataHash === lastHash && (Date.now() - lastSentData.timestamp) < 500) {
-      console.log('🚫 중복 전송 방지:', dataHash);
+    // 동일한 데이터이고 지난 전송 후 2초가 지나지 않았으면 건너뛰기 (Edge Requests 절약)
+    if (dataHash === lastHash && (Date.now() - lastSentData.timestamp) < 2000) {
+      console.log('🚫 중복 전송 방지 (Edge Requests 절약):', dataHash);
       return;
     }
     
@@ -215,15 +215,16 @@ export default function Home() {
       }
     };
 
-    // 🎯 OBS 오버레이에 최우선으로 전송 (번역 품질 영향 없음)
+    // 🎯 OBS 오버레이에 최우선으로 전송 (Edge Requests 절약을 위해 재시도 제한)
     let success = await sendToAPI();
-    if (!success && updateData.translatedText) { // 번역된 텍스트가 있을 때만 재시도
-      console.log('🔄 OBS 우선순위 - API 전송 재시도...');
-      await new Promise(resolve => setTimeout(resolve, 100)); // 100ms로 단축 (더 빠르게)
+    // 재시도는 중요한 최종 번역 결과에만 제한 (중간 결과는 재시도하지 않음)
+    if (!success && updateData.translatedText && !isTranslating) { 
+      console.log('🔄 중요한 최종 번역만 재시도 (Edge Requests 절약)');
+      await new Promise(resolve => setTimeout(resolve, 500)); // 500ms로 증가 (서버 부하 감소)
       success = await sendToAPI();
       
       if (!success) {
-        console.error('❌ API 전송 최종 실패 - OBS 동기화 안될 수 있음');
+        console.warn('⚠️ API 전송 실패 - PostMessage로 대체 전송');
       }
     }
 
@@ -273,12 +274,15 @@ export default function Home() {
     }
   }, [sourceLanguage, targetLanguage, sessionId, dissolveTimer, resetDissolveTimer]);
 
-  // 초고속 실시간 번역 함수 (단어별 즉시 번역) - 동기화 개선
+  // 실시간 번역 함수 (Edge Requests 절약을 위해 최적화)
   const handleInterimTranslation = useCallback(async (text: string) => {
     if (!realtimeSettings.enableInterimTranslation) return;
     if (text.length < realtimeSettings.interimThreshold) return;
 
-    console.log('⚡ 실시간 번역 시작:', text);
+    // Edge Requests 절약: 중간 번역은 더 긴 간격으로 제한 (5글자 → 8글자)
+    if (text.length < 8) return;
+
+    console.log('⚡ 실시간 번역 시작 (Edge Requests 절약):', text);
 
     // 기존 타이머 클리어
     if (translationTimer) {
@@ -667,8 +671,8 @@ export default function Home() {
 
     window.addEventListener('storage', handleStorageChange);
 
-    // 빠른 폴링으로 같은 탭 내 변경사항도 감지 (간격 연장)
-    const interval = setInterval(loadSyncData, 300); // 100ms → 300ms로 변경
+    // Edge Requests 절약을 위해 폴링 간격 대폭 증가
+    const interval = setInterval(loadSyncData, 1000); // 300ms → 1000ms로 변경 (Edge Requests 절약)
 
     return () => {
       window.removeEventListener('storage', handleStorageChange);
