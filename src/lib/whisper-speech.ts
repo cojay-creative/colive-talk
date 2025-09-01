@@ -421,5 +421,29 @@ export class WhisperSpeechService {
 
 // 전역 인스턴스 생성 (기존 webSpeechService와 동일한 패턴)
 console.log('🌍 Whisper 전역 인스턴스 생성 시작');
-export const whisperSpeechService = new WhisperSpeechService();
-console.log('🌍 Whisper 전역 인스턴스 생성 완료');
+
+let whisperSpeechService: WhisperSpeechService;
+
+// 안전한 인스턴스 생성 (SSR 환경 고려)
+try {
+  whisperSpeechService = new WhisperSpeechService();
+  console.log('🌍 Whisper 전역 인스턴스 생성 완료');
+} catch (error) {
+  console.error('❌ Whisper 전역 인스턴스 생성 실패:', error);
+  // 빈 객체로 폴백 (완전히 실패하지 않도록)
+  whisperSpeechService = {
+    start: async () => { console.log('❌ Whisper 서비스 사용 불가'); return false; },
+    stop: () => { console.log('❌ Whisper 서비스 사용 불가'); },
+    onResult: () => {},
+    onInterimResult: () => {},
+    onError: () => {},
+    onStatus: () => {},
+    onEnd: () => {},
+    destroy: () => {},
+    isModelReady: () => false,
+    getConfig: () => ({ model: 'whisper-tiny' as const, chunkDuration: 2000 }),
+    updateConfig: () => {}
+  } as any;
+}
+
+export { whisperSpeechService };

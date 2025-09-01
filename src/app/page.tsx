@@ -5,7 +5,7 @@ import ErrorBoundary from '../components/ErrorBoundary';
 import Header from '../components/Header';
 import Sidebar from '../components/Sidebar';
 // import { webSpeechService } from '../lib/speech'; 
-import { whisperSpeechService as webSpeechService } from '../lib/whisper-speech'; // 🤖 Whisper 모델 단독 테스트
+// import { whisperSpeechService as webSpeechService } from '../lib/whisper-speech'; // 🤖 Whisper 모델 단독 테스트
 // import { hybridSpeechService as webSpeechService } from '../lib/hybrid-speech'; // 🤖 Whisper AI 우선, Web Speech 폴백
 import { freeTranslationService } from '../lib/translate';
 import { syncService } from '../lib/sync';
@@ -43,6 +43,10 @@ export default function Home() {
   
   // 사용자별 고유 세션 ID
   const [sessionId, setSessionId] = useState('');
+  
+  // 동적으로 로드할 음성 서비스
+  const [webSpeechService, setWebSpeechService] = useState<any>(null);
+  const [serviceLoadError, setServiceLoadError] = useState<string>('');
   
   // 실시간 번역 설정 (초고속 반응형)
   const [realtimeSettings, setRealtimeSettings] = useState({
@@ -384,6 +388,32 @@ export default function Home() {
       } else {
         console.log('🆔 기존 세션 ID 복구:', userSessionId);
       }
+      
+      // 동적으로 Whisper 서비스 로드
+      const loadWhisperService = async () => {
+        try {
+          console.log('🔄 Whisper 서비스 동적 로딩 시작...');
+          const { whisperSpeechService } = await import('../lib/whisper-speech');
+          setWebSpeechService(whisperSpeechService);
+          console.log('✅ Whisper 서비스 동적 로딩 성공');
+        } catch (error) {
+          console.error('❌ Whisper 서비스 동적 로딩 실패:', error);
+          setServiceLoadError(`Whisper 서비스 로딩 실패: ${error}`);
+          
+          // 폴백으로 Web Speech API 로드 시도
+          try {
+            console.log('🔄 Web Speech API로 폴백 시도...');
+            const { webSpeechService } = await import('../lib/speech');
+            setWebSpeechService(webSpeechService);
+            console.log('✅ Web Speech API 폴백 로딩 성공');
+          } catch (fallbackError) {
+            console.error('❌ Web Speech API 폴백도 실패:', fallbackError);
+            setServiceLoadError(`모든 음성 서비스 로딩 실패: ${fallbackError}`);
+          }
+        }
+      };
+      
+      loadWhisperService();
       setSessionId(userSessionId);
     }
   }, []);
@@ -685,6 +715,15 @@ export default function Home() {
     console.log('🎤 음성 인식 토글:', !isListening);
     
     if (!isListening) {
+      // 서비스 로딩 확인
+      if (!webSpeechService) {
+        setError('음성 서비스가 아직 로드되지 않았습니다. 잠시 후 다시 시도해주세요.');
+        if (serviceLoadError) {
+          setError(serviceLoadError);
+        }
+        return;
+      }
+      
       // 음성 인식 시작
       setError('');
       setOriginalText('');
