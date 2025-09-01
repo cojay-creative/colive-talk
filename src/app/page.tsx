@@ -5,8 +5,8 @@ import ErrorBoundary from '../components/ErrorBoundary';
 import Header from '../components/Header';
 import Sidebar from '../components/Sidebar';
 // import { webSpeechService } from '../lib/speech'; 
-// import { whisperSpeechService as webSpeechService } from '../lib/whisper-speech'; 
-import { hybridSpeechService as webSpeechService } from '../lib/hybrid-speech'; // 🤖 Whisper AI 우선, Web Speech 폴백
+import { whisperSpeechService as webSpeechService } from '../lib/whisper-speech'; // 🤖 Whisper 모델 단독 테스트
+// import { hybridSpeechService as webSpeechService } from '../lib/hybrid-speech'; // 🤖 Whisper AI 우선, Web Speech 폴백
 import { freeTranslationService } from '../lib/translate';
 import { syncService } from '../lib/sync';
 
@@ -681,7 +681,7 @@ export default function Home() {
   }, []);
 
 
-  const toggleListening = useCallback(() => {
+  const toggleListening = useCallback(async () => {
     console.log('🎤 음성 인식 토글:', !isListening);
     
     if (!isListening) {
@@ -689,23 +689,39 @@ export default function Home() {
       setError('');
       setOriginalText('');
       setTranslatedText('');
+      setStatus('🤖 Whisper AI 모델 준비 중...');
       
-      const success = webSpeechService.start(sourceLanguage);
-      if (success) {
-        setIsListening(true);
-        setStatus('🎤 음성 인식 시작 중...');
+      try {
+        console.log('🚀 Whisper 서비스 직접 시작 시도');
+        const success = await webSpeechService.start(sourceLanguage);
+        if (success) {
+          setIsListening(true);
+          setStatus('🎤 Whisper AI 음성 인식 활성');
+          
+          // 음성 인식 시작 동기화
+          updateSubtitles('', '', true, false);
+        } else {
+          setError('Whisper AI 모델 로딩 실패. 네트워크 상태를 확인해주세요.');
+          setStatus('Whisper AI 시작 실패');
+          
+          // 동기화 서비스에 오류 상태 업데이트
+          syncService.updateData({
+            isListening: false,
+            status: 'Whisper AI 시작 실패',
+            error: 'Whisper AI 모델 로딩 실패. 네트워크 상태를 확인해주세요.',
+            sourceLanguage: sourceLanguage,
+            targetLanguage: targetLanguage
+          });
+        }
+      } catch (error) {
+        console.error('❌ Whisper 시작 중 오류:', error);
+        setError(`Whisper AI 오류: ${error}`);
+        setStatus('Whisper AI 오류 발생');
         
-        // 음성 인식 시작 동기화
-        updateSubtitles('', '', true, false);
-      } else {
-        setError('음성 인식을 시작할 수 없습니다. 브라우저에서 마이크 권한을 허용해주세요.');
-        setStatus('음성 인식 시작 실패');
-        
-        // 동기화 서비스에 오류 상태 업데이트
         syncService.updateData({
           isListening: false,
-          status: '음성 인식 시작 실패',
-          error: '음성 인식을 시작할 수 없습니다. 브라우저에서 마이크 권한을 허용해주세요.',
+          status: 'Whisper AI 오류 발생',
+          error: `Whisper AI 오류: ${error}`,
           sourceLanguage: sourceLanguage,
           targetLanguage: targetLanguage
         });
