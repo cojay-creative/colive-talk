@@ -15,7 +15,11 @@ export class HybridSpeechService {
 
   constructor() {
     console.log('🔄 하이브리드 음성인식 서비스 초기화');
-    this.detectCapabilities();
+    // 즉시 실행하되 에러 처리 추가
+    this.detectCapabilities().catch(error => {
+      console.error('❌ 초기화 중 오류:', error);
+      this.updateStatus('❌ 초기화 실패 - Web Speech API 사용');
+    });
   }
 
   // 브라우저 능력 감지 (Whisper AI 우선, 안전한 폴백)
@@ -100,8 +104,24 @@ export class HybridSpeechService {
 
   async start(language: string = 'ko-KR'): Promise<boolean> {
     try {
+      console.log('🎯 하이브리드 음성인식 시작 요청');
+      
+      // Whisper 초기화가 아직 진행 중일 수 있으므로 잠시 대기
+      if (!this.useWhisper && !this.whisperService) {
+        console.log('⏳ Whisper 초기화 대기 중...');
+        this.updateStatus('🤖 AI 모델 초기화 대기 중...');
+        
+        // 최대 15초간 초기화 완료 대기 (모델 다운로드 시간 고려)
+        for (let i = 0; i < 150; i++) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          if (this.useWhisper || this.whisperService !== null) break;
+        }
+        
+        console.log(`🔍 대기 완료: useWhisper=${this.useWhisper}, hasWhisperService=${!!this.whisperService}`);
+      }
+      
       if (this.useWhisper && this.whisperService) {
-        console.log('🤖 Whisper AI 음성인식 시작');
+        console.log('🤖 Whisper AI 음성인식 시작 - 마이크 권한 요청 예정');
         this.currentService = this.whisperService;
         
         // Whisper 콜백 설정
@@ -127,9 +147,18 @@ export class HybridSpeechService {
           if (this.onEndCallback) this.onEndCallback();
         });
         
-        return await this.whisperService.start(language);
+        console.log('📞 Whisper 서비스 start() 함수 호출 중...');
+        const whisperResult = await this.whisperService.start(language);
+        if (whisperResult) {
+          console.log('✅ Whisper AI 음성인식 시작 성공 - 마이크 활성화됨');
+          return true;
+        } else {
+          console.warn('⚠️ Whisper 시작 실패, Web Speech로 폴백');
+          return this.fallbackToWebSpeech(language);
+        }
         
       } else {
+        console.log('🎤 Web Speech API로 직접 시작');
         return this.startWebSpeech(language);
       }
     } catch (error) {

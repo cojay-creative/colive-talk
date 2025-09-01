@@ -194,6 +194,7 @@ export class WhisperSpeechService {
 
       this.shouldRestart = true;
       this.updateStatus('마이크 권한 요청 중...');
+      console.log('🎤 마이크 권한 요청 시작...');
 
       // 마이크 권한 요청 및 스트림 생성
       this.stream = await navigator.mediaDevices.getUserMedia({ 
@@ -205,6 +206,8 @@ export class WhisperSpeechService {
           autoGainControl: true
         } 
       });
+
+      console.log('✅ 마이크 권한 허용됨, MediaRecorder 설정 중...');
 
       // MediaRecorder 설정
       const mimeType = this.getSupportedMimeType();
@@ -232,11 +235,12 @@ export class WhisperSpeechService {
       };
 
       // 실시간 처리를 위한 주기적 데이터 수집
+      console.log(`🎙️ MediaRecorder 시작 (${this.config.chunkDuration}ms 간격)`);
       this.mediaRecorder.start(this.config.chunkDuration);
       this.isListening = true;
       this.updateStatus('🎤 AI 음성인식 활성 (Whisper)');
       
-      console.log('🎙️ Whisper 음성인식 시작');
+      console.log('✅ Whisper 음성인식 완전 활성화 - 마이크 대기 중');
       return true;
 
     } catch (error) {
