@@ -7,11 +7,21 @@ import Sidebar from '../components/Sidebar';
 // import { webSpeechService } from '../lib/speech'; 
 // import { whisperSpeechService as webSpeechService } from '../lib/whisper-speech'; // 🤖 Whisper 모델 단독 테스트
 // import { hybridSpeechService as webSpeechService } from '../lib/hybrid-speech'; // 🤖 Whisper AI 우선, Web Speech 폴백
-import { freeTranslationService } from '../lib/translate';
-import { syncService } from '../lib/sync';
+// import { freeTranslationService } from '../lib/translate';
+// import { syncService } from '../lib/sync';
+
+console.log('📄 page.tsx 파일 로드됨');
 
 export default function Home() {
   console.log('🏠 Home 컴포넌트 렌더링 시작');
+  
+  // 매우 기본적인 테스트
+  try {
+    console.log('✅ 기본 JavaScript 실행 테스트 성공');
+  } catch (e) {
+    console.error('❌ 기본 JavaScript 실행 실패:', e);
+  }
+  
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [currentSection, setCurrentSection] = useState('control');
   const [isListening, setIsListening] = useState(false);
