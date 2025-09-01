@@ -8,6 +8,7 @@ export class WebSpeechService {
   private onInterimResultCallback: ((text: string) => void) | null = null;
   private onErrorCallback: ((error: string) => void) | null = null;
   private onStatusCallback: ((status: string) => void) | null = null;
+  private onEndCallback: (() => void) | null = null;
   private restartTimeout: NodeJS.Timeout | null = null;
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private lastActivity = Date.now();
@@ -159,6 +160,11 @@ export class WebSpeechService {
         // 사용자가 의도적으로 중지한 경우만 isListening을 false로 설정
         this.isListening = false;
         this.notifyStatus('음성 인식 중지됨');
+        
+        // onEnd 콜백 호출
+        if (this.onEndCallback) {
+          this.onEndCallback();
+        }
       }
     };
 
@@ -521,6 +527,11 @@ export class WebSpeechService {
     this.onStatusCallback = callback;
   }
 
+  // 종료 콜백 설정
+  onEnd(callback: () => void) {
+    this.onEndCallback = callback;
+  }
+
   // 노이즈 필터링 함수
   private filterNoise(text: string): string | null {
     // 특수 기호 제거
@@ -573,6 +584,13 @@ export class WebSpeechService {
     }
     
     this.isListening = false;
+    
+    // 콜백 정리
+    this.onResultCallback = null;
+    this.onInterimResultCallback = null;
+    this.onErrorCallback = null;
+    this.onStatusCallback = null;
+    this.onEndCallback = null;
   }
 
   // 지원하는 언어 목록
