@@ -11,6 +11,7 @@ import { freeTranslationService } from '../lib/translate';
 import { syncService } from '../lib/sync';
 
 export default function Home() {
+  console.log('🏠 Home 컴포넌트 렌더링 시작');
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [currentSection, setCurrentSection] = useState('control');
   const [isListening, setIsListening] = useState(false);
@@ -376,7 +377,9 @@ export default function Home() {
   }, [targetLanguage, realtimeSettings.autoSegmentLength, isListening, updateSubtitles]);
   
   useEffect(() => {
+    console.log('🔄 useEffect 실행됨 - 초기화 시작');
     if (typeof window !== 'undefined') {
+      console.log('🔄 브라우저 환경 확인됨');
       setCurrentOrigin(window.location.origin);
       
       // 고유한 세션 ID 생성 또는 기존 세션 복구
@@ -389,31 +392,30 @@ export default function Home() {
         console.log('🆔 기존 세션 ID 복구:', userSessionId);
       }
       
-      // 동적으로 Whisper 서비스 로드
-      const loadWhisperService = async () => {
-        try {
-          console.log('🔄 Whisper 서비스 동적 로딩 시작...');
-          const { whisperSpeechService } = await import('../lib/whisper-speech');
-          setWebSpeechService(whisperSpeechService);
-          console.log('✅ Whisper 서비스 동적 로딩 성공');
-        } catch (error) {
-          console.error('❌ Whisper 서비스 동적 로딩 실패:', error);
-          setServiceLoadError(`Whisper 서비스 로딩 실패: ${error}`);
-          
-          // 폴백으로 Web Speech API 로드 시도
-          try {
-            console.log('🔄 Web Speech API로 폴백 시도...');
-            const { webSpeechService } = await import('../lib/speech');
-            setWebSpeechService(webSpeechService);
-            console.log('✅ Web Speech API 폴백 로딩 성공');
-          } catch (fallbackError) {
-            console.error('❌ Web Speech API 폴백도 실패:', fallbackError);
-            setServiceLoadError(`모든 음성 서비스 로딩 실패: ${fallbackError}`);
-          }
-        }
-      };
+      // 단순한 Whisper 서비스 테스트
+      console.log('🔄 Whisper 서비스 로딩 테스트 시작...');
       
-      loadWhisperService();
+      setTimeout(async () => {
+        console.log('🔄 타이머 실행됨 - 동적 import 시도');
+        
+        try {
+          console.log('📦 whisper-speech 모듈 import 중...');
+          const whisperModule = await import('../lib/whisper-speech');
+          console.log('✅ whisper-speech 모듈 import 성공:', Object.keys(whisperModule));
+          
+          if (whisperModule.whisperSpeechService) {
+            setWebSpeechService(whisperModule.whisperSpeechService);
+            console.log('✅ whisperSpeechService 설정 완료');
+          } else {
+            console.error('❌ whisperSpeechService가 모듈에 없음');
+            setServiceLoadError('whisperSpeechService를 찾을 수 없음');
+          }
+        } catch (importError) {
+          console.error('❌ whisper-speech 모듈 import 실패:', importError);
+          console.error('오류 상세:', importError.message, importError.stack);
+          setServiceLoadError(`Whisper 모듈 import 실패: ${importError.message}`);
+        }
+      }, 1000);
       setSessionId(userSessionId);
     }
   }, []);
