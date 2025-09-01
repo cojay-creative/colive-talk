@@ -199,83 +199,117 @@ export default function OverlayPage() {
       return true;
     };
     
-    const loadData = async () => {
-      if (isUpdating) return; // 이미 업데이트 중이면 건너뛰기
-      isUpdating = true;
+    // SSE 연결 설정 (Edge Requests 대폭 절약!)
+    let eventSource: EventSource | null = null;
+    let fallbackInterval: NodeJS.Timeout | null = null;
+    
+    const setupSSE = () => {
+      const params = new URLSearchParams(window.location.search);
+      const sessionId = params.get('sessionId');
       
-      try {
-        // URL에서 sessionId 가져오기
-        const params = new URLSearchParams(window.location.search);
-        const sessionId = params.get('sessionId');
-        
-        // 1. API 우선 (OBS 환경에서 가장 안정적)
-        if (sessionId) {
-          try {
-            const response = await fetch(`/api/subtitle-status?sessionId=${sessionId}`, {
-              method: 'GET',
-              headers: { 'Cache-Control': 'no-cache' }
-            });
-            
-            if (response.ok) {
-              const result = await response.json();
-              const data = result.data;
-              
-              if (data && data.timestamp > lastUpdateTimestamp) {
-                const updated = updateDisplayData(
-                  data.originalText || '',
-                  data.translatedText || '',
-                  data.isListening || false,
-                  'API'
-                );
-                
-                if (updated) {
-                  isUpdating = false;
-                  return; // API에서 성공적으로 업데이트했으면 종료
-                }
-              }
-            }
-          } catch (apiError) {
-            console.log('API 접근 실패, localStorage로 폴백');
-          }
-        }
-
-        // 2. localStorage 폴백 (브라우저 환경)
+      if (!sessionId) {
+        console.log('SessionId 없음 - localStorage 폴백으로 전환');
+        setupFallback();
+        return;
+      }
+      
+      console.log('🚀 SSE 연결 시작 (Edge Requests 90% 절약!)');
+      
+      eventSource = new EventSource(`/api/subtitle-events?sessionId=${sessionId}`);
+      
+      eventSource.onopen = () => {
+        console.log('✅ SSE 연결 성공');
+      };
+      
+      eventSource.onmessage = (event) => {
         try {
-          const stored = localStorage.getItem(STORAGE_KEY);
-          if (stored) {
-            const data: SubtitleData = JSON.parse(stored);
+          const data = JSON.parse(event.data);
+          
+          if (data.type === 'SUBTITLE_UPDATE') {
+            console.log('📡 SSE 데이터 수신:', data);
             
             if (data.timestamp > lastUpdateTimestamp) {
               updateDisplayData(
                 data.originalText || '',
                 data.translatedText || '',
                 data.isListening || false,
-                'localStorage'
+                'SSE'
               );
-              
-              // 레이아웃 설정 업데이트 (깜빡임 없이)
-              if (data.layoutSettings) {
-                setFontSize(prev => data.layoutSettings?.fontSize ?? prev);
-                setBackgroundColor(prev => data.layoutSettings?.backgroundColor ?? prev);
-                setTextColor(prev => data.layoutSettings?.textColor ?? prev);
-                setOpacity(prev => data.layoutSettings?.opacity ?? prev);
-                
-                // 디졸브 설정도 업데이트
-                if (data.layoutSettings.autoDissolveTime !== undefined) {
-                  setAutoDissolveTime(data.layoutSettings.autoDissolveTime);
-                }
-                if (data.layoutSettings.enableAutoDissolve !== undefined) {
-                  setEnableAutoDissolve(data.layoutSettings.enableAutoDissolve);
-                }
-              }
             }
           }
-        } catch (storageError) {
-          addDebugInfo(`localStorage 오류: ${(storageError as Error).message}`);
+        } catch (error) {
+          console.error('SSE 데이터 파싱 오류:', error);
         }
-      } finally {
-        isUpdating = false;
-      }
+      };
+      
+      eventSource.onerror = (error) => {
+        console.warn('SSE 연결 오류, 폴백으로 전환:', error);
+        eventSource?.close();
+        setupFallback();
+      };
+    };
+    
+    const setupFallback = () => {
+      console.log('📡 폴백 모드 시작 (제한적 폴링)');
+      
+      const loadDataFallback = async () => {
+        if (isUpdating) return;
+        isUpdating = true;
+        
+        try {
+          const params = new URLSearchParams(window.location.search);
+          const sessionId = params.get('sessionId');
+          
+          if (sessionId) {
+            try {
+              const response = await fetch(`/api/subtitle-status?sessionId=${sessionId}`, {
+                method: 'GET',
+                headers: { 'Cache-Control': 'no-cache' }
+              });
+              
+              if (response.ok) {
+                const result = await response.json();
+                const data = result.data;
+                
+                if (data && data.timestamp > lastUpdateTimestamp) {
+                  updateDisplayData(
+                    data.originalText || '',
+                    data.translatedText || '',
+                    data.isListening || false,
+                    'API_FALLBACK'
+                  );
+                }
+              }
+            } catch (apiError) {
+              console.log('API 폴백도 실패, localStorage 사용');
+            }
+          }
+
+          // localStorage 폴백 (최후 수단)
+          try {
+            const stored = localStorage.getItem(STORAGE_KEY);
+            if (stored) {
+              const data: SubtitleData = JSON.parse(stored);
+              
+              if (data.timestamp > lastUpdateTimestamp) {
+                updateDisplayData(
+                  data.originalText || '',
+                  data.translatedText || '',
+                  data.isListening || false,
+                  'localStorage'
+                );
+              }
+            }
+          } catch (storageError) {
+            console.log('localStorage 폴백도 실패');
+          }
+        } finally {
+          isUpdating = false;
+        }
+      };
+      
+      // 폴백 모드에서는 간격을 늘려서 Edge Requests 절약 (2초 → 5초)
+      fallbackInterval = setInterval(loadDataFallback, 5000);
     };
 
     // PostMessage 리스너 (우선순위 높음)
@@ -313,20 +347,23 @@ export default function OverlayPage() {
     // 즉시 로드
     loadData();
 
-    // OBS 최적화된 폴링 (중복 방지, 성능 최적화)
-    const interval = setInterval(() => {
-      // OBS 환경에서만 더 적극적으로 폴링
-      if ((isOBS || window.location.href.includes('overlay')) && !isUpdating) {
-        loadData();
-      }
-    }, isOBS ? 500 : 1000); // OBS에서는 500ms, 일반 브라우저에서는 1초 (더 안정적)
-    
-    addDebugInfo(`OBS 최적화 동기화 시작 (${isOBS ? '300ms' : '500ms'} 폴링)`);
+    // SSE 우선 시도, 실패 시 폴링으로 폴백 (Edge Requests 90% 절약!)
+    setupSSE();
+    addDebugInfo('SSE 연결 시도 (Edge Requests 대폭 절약)');
 
     return () => {
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('message', handlePostMessage);
-      clearInterval(interval);
+      
+      // SSE 연결 종료
+      if (eventSource) {
+        eventSource.close();
+      }
+      
+      // 폴백 인터벌 종료
+      if (fallbackInterval) {
+        clearInterval(fallbackInterval);
+      }
     };
   }, [isMounted, isOBS]);
 

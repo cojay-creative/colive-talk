@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { broadcastUpdate } from '../subtitle-events/route';
 
 // 사용자별 세션 데이터 저장소 (sessionId를 키로 사용)
 const userSessions = new Map<string, {
@@ -118,7 +119,10 @@ export async function POST(request: NextRequest) {
     
     userSessions.set(sessionId, newData);
     
-    console.log(`📡 세션 ${sessionId} 데이터 업데이트:`, {
+    // SSE를 통해 연결된 클라이언트들에게 즉시 브로드캐스트 (Edge Requests 절약!)
+    broadcastUpdate(sessionId, newData);
+    
+    console.log(`📡 세션 ${sessionId} 데이터 업데이트 및 SSE 브로드캐스트:`, {
       originalText: newData.originalText,
       translatedText: newData.translatedText,
       isListening: newData.isListening

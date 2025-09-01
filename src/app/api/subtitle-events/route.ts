@@ -106,10 +106,14 @@ export function broadcastUpdate(sessionId: string, data: any) {
     connections.forEach(controller => {
       try {
         controller.enqueue(message);
+        console.log(`📡 SSE 브로드캐스트 전송: ${sessionId}`);
       } catch (error) {
         // 연결이 끊긴 클라이언트는 자동으로 정리됨
         connections.delete(controller);
+        console.log(`🧹 연결 끊김 클라이언트 정리: ${sessionId}`);
       }
     });
+  } else {
+    console.log(`📡 연결된 클라이언트 없음: ${sessionId}`);
   }
 }

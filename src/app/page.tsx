@@ -4,9 +4,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import ErrorBoundary from '../components/ErrorBoundary';
 import Header from '../components/Header';
 import Sidebar from '../components/Sidebar';
-import { webSpeechService } from '../lib/speech';
+// import { webSpeechService } from '../lib/speech';
 // import { whisperSpeechService as webSpeechService } from '../lib/whisper-speech'; // Whisper로 교체
-// import { hybridSpeechService as webSpeechService } from '../lib/hybrid-speech'; // 하이브리드 서비스 (Whisper + 폴백)
+import { hybridSpeechService as webSpeechService } from '../lib/hybrid-speech'; // 하이브리드 서비스 (Whisper + 폴백) - Edge Requests 절약
 import { freeTranslationService } from '../lib/translate';
 import { syncService } from '../lib/sync';
 
@@ -47,9 +47,9 @@ export default function Home() {
   // 실시간 번역 설정 (초고속 반응형)
   const [realtimeSettings, setRealtimeSettings] = useState({
     enableInterimTranslation: true,    // 중간 결과 번역 활성화
-    interimThreshold: 3,                // 중간 번역 시작 글자 수 (3글자로 감소)
+    interimThreshold: 4,                // 중간 번역 시작 글자 수 (Whisper 활성화로 4글자로 최적화)
     autoSegmentLength: 50,              // 자동 분할 길이 (글자 수)
-    translationDelay: 300,              // 번역 지연 시간 (1초 → 300ms)
+    translationDelay: 200,              // 번역 지연 시간 (Whisper 활성화로 200ms로 단축)
     autoDissolveTime: 5,                // 자동 디졸브 시간 (초)
     enableAutoDissolve: true,           // 자동 디졸브 활성화
     wordByWordMode: true,               // 단어별 실시간 번역 모드
@@ -279,8 +279,8 @@ export default function Home() {
     if (!realtimeSettings.enableInterimTranslation) return;
     if (text.length < realtimeSettings.interimThreshold) return;
 
-    // Edge Requests 절약: 중간 번역은 더 긴 간격으로 제한 (5글자 → 8글자)
-    if (text.length < 8) return;
+    // Edge Requests 절약하면서도 빠른 반응: Whisper 활성화로 중간 번역 효율적 (6글자로 절충)
+    if (text.length < 6) return;
 
     console.log('⚡ 실시간 번역 시작 (Edge Requests 절약):', text);
 
