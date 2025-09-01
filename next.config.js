@@ -20,7 +20,8 @@ const nextConfig = {
     ignoreDuringBuilds: process.env.NODE_ENV === 'production',
   },
   compiler: {
-    removeConsole: process.env.NODE_ENV === 'production',
+    // removeConsole: process.env.NODE_ENV === 'production', // 디버깅을 위해 임시 비활성화
+    removeConsole: false, // console.log를 유지하여 Whisper 디버깅 가능
   },
   
   // 출력 설정 (필요시 정적 사이트로 변경)

@@ -9,9 +9,22 @@ export default function SimpleHome() {
   
   // 클라이언트 사이드에서만 실행
   useEffect(() => {
+    // console.log 대신 다른 방법들 시도
     console.log('🌐 useEffect 실행됨 - 클라이언트 사이드');
-    console.log('✅ 브라우저 환경 확인:', typeof window !== 'undefined');
-    console.log('📱 User Agent:', navigator.userAgent);
+    console.warn('⚠️ console.warn 테스트');
+    console.error('❌ console.error 테스트 (무시하세요)');
+    console.info('ℹ️ console.info 테스트');
+    
+    // DOM에 직접 정보 표시
+    const debugDiv = document.getElementById('debug-info');
+    if (debugDiv) {
+      debugDiv.innerHTML = `
+        <strong>🔍 실행 확인:</strong><br/>
+        - useEffect 실행됨: ${new Date().toLocaleTimeString()}<br/>
+        - 브라우저 환경: ${typeof window !== 'undefined'}<br/>
+        - User Agent: ${navigator.userAgent.substring(0, 50)}...
+      `;
+    }
   }, []);
   
   try {
@@ -25,9 +38,33 @@ export default function SimpleHome() {
       <h1>🔧 디버깅 모드 - Simple Home</h1>
       <p>이 페이지가 보인다면 React 기본 렌더링은 성공한 것입니다.</p>
       <p>F12 개발자 도구 콘솔에서 로그를 확인하세요.</p>
+      <div id="debug-info" style={{
+        background: '#ffffcc', 
+        padding: '10px', 
+        border: '2px solid #ff6600', 
+        marginBottom: '20px',
+        fontFamily: 'monospace'
+      }}>
+        DOM 업데이트 대기 중...
+      </div>
+      
       <button 
         onClick={() => {
-          console.log('🖱️ 버튼 클릭됨 - 이벤트 핸들러 테스트');
+          // 여러 방법으로 테스트
+          console.log('🖱️ 버튼 클릭됨 - console.log');
+          console.warn('🖱️ 버튼 클릭됨 - console.warn');
+          console.error('🖱️ 버튼 클릭됨 - console.error');
+          
+          // DOM 업데이트
+          const debugDiv = document.getElementById('debug-info');
+          if (debugDiv) {
+            debugDiv.innerHTML = `
+              <strong>🖱️ 버튼 클릭됨!</strong><br/>
+              시간: ${new Date().toLocaleTimeString()}<br/>
+              콘솔 로그가 나타나지 않는다면 프로덕션 환경에서 제거됨
+            `;
+          }
+          
           alert('버튼 클릭 테스트 성공!');
         }}
         style={{
