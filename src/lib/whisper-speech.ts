@@ -91,7 +91,9 @@ export class WhisperSpeechService {
     if (config) {
       this.config = { ...this.config, ...config };
     }
+    console.log('🎙️ Whisper Speech Service 생성자 호출됨');
     console.log('🎙️ Whisper Speech Service 초기화:', this.config);
+    console.log('🔍 브라우저 환경:', typeof window !== 'undefined' ? '브라우저' : '서버');
   }
 
   // 기존 Web Speech API와 동일한 인터페이스
@@ -418,4 +420,6 @@ export class WhisperSpeechService {
 }
 
 // 전역 인스턴스 생성 (기존 webSpeechService와 동일한 패턴)
+console.log('🌍 Whisper 전역 인스턴스 생성 시작');
 export const whisperSpeechService = new WhisperSpeechService();
+console.log('🌍 Whisper 전역 인스턴스 생성 완료');

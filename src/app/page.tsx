@@ -693,6 +693,13 @@ export default function Home() {
       
       try {
         console.log('🚀 Whisper 서비스 직접 시작 시도');
+        console.log('🔍 webSpeechService 객체 확인:', {
+          service: typeof webSpeechService,
+          hasStart: typeof webSpeechService?.start,
+          hasInitialize: typeof webSpeechService?.initialize,
+          isModelReady: webSpeechService?.isModelReady?.()
+        });
+        
         const success = await webSpeechService.start(sourceLanguage);
         if (success) {
           setIsListening(true);
