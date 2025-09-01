@@ -18,6 +18,7 @@ export class WebSpeechService {
   constructor() {
     this.initializeSpeechRecognition();
     this.setupPageVisibilityHandler();
+    this.setupNetworkMonitoring();
     this.startHeartbeat();
     // MVP: 마이크 로드 기능 제거
   }
@@ -87,8 +88,27 @@ export class WebSpeechService {
     this.recognition.onerror = (event: any) => {
       console.error('🚨 Speech recognition error:', event.error, 'Type:', event.type);
       
-      // 네트워크 오류 및 복구 가능한 오류들에 대한 특별 처리
-      const recoverableErrors = ['network', 'audio-capture', 'aborted', 'no-speech', 'service-not-allowed'];
+      // no-speech는 항상 복구 가능한 정상적인 상황으로 처리
+      if (event.error === 'no-speech' && this.shouldRestart) {
+        console.log('🔇 no-speech 감지 - 정상적인 대기 모드, 즉시 재시작');
+        
+        // UI 상태는 "listening" 유지 (사용자에게 중단되지 않은 것처럼 표시)
+        this.isListening = true;
+        this.notifyStatus('🎤 음성을 기다리는 중...');
+        
+        // 즉시 재시작 (no-speech는 오류가 아닌 정상 상황)
+        setTimeout(() => {
+          if (this.shouldRestart) {
+            console.log('🔄 no-speech 후 즉시 재시작');
+            this.forceStart();
+          }
+        }, 100); // 100ms만 대기 (매우 빠른 재시작)
+        
+        return; // 다른 오류 처리 로직 건너뛰기
+      }
+      
+      // 기타 복구 가능한 오류들
+      const recoverableErrors = ['network', 'audio-capture', 'aborted', 'service-not-allowed'];
       const isRecoverableError = recoverableErrors.includes(event.error);
       
       if (isRecoverableError && this.shouldRestart) {
@@ -438,12 +458,35 @@ export class WebSpeechService {
     this.notifyStatus('음성 인식 중지됨');
   }
 
-  // 언어 설정
+  // 언어 설정 (실시간 변경, 재시작 없이)
   setLanguage(lang: string) {
+    const previousLanguage = this.currentLanguage;
     this.currentLanguage = lang;
+    
     if (this.recognition) {
-      this.recognition.lang = lang;
-      console.log(`🎯 언어 설정 변경: ${lang}`);
+      console.log(`🎯 언어 설정 변경: ${previousLanguage} → ${lang}`);
+      
+      // 음성인식이 실행 중이라면 부드럽게 언어 변경
+      if (this.isListening) {
+        console.log('🔄 음성인식 중 실시간 언어 변경');
+        
+        // 기존 인식을 잠깐 중지하고 새 언어로 재시작
+        this.recognition.stop();
+        
+        // 언어 설정 업데이트
+        this.recognition.lang = lang;
+        
+        // 200ms 후 새 언어로 자동 재시작 (onend 이벤트에서 처리됨)
+        setTimeout(() => {
+          if (this.shouldRestart) {
+            console.log('🎯 언어 변경 완료 - 새 언어로 재시작');
+            this.forceStart();
+          }
+        }, 200);
+      } else {
+        // 음성인식이 꺼져있다면 단순히 언어만 변경
+        this.recognition.lang = lang;
+      }
       
       // 언어별 추가 설정
       if (lang.startsWith('ko')) {
@@ -453,6 +496,8 @@ export class WebSpeechService {
         // 영어: 영어 인식 최적화
         this.recognition.maxAlternatives = 1;
       }
+      
+      this.notifyStatus(`언어 변경: ${lang}`);
     }
   }
 

@@ -1276,10 +1276,19 @@ export default function Home() {
                     <select
                       value={sourceLanguage}
                       onChange={(e) => {
-                        setSourceLanguage(e.target.value);
+                        const newSourceLanguage = e.target.value;
+                        setSourceLanguage(newSourceLanguage);
+                        
+                        // 음성인식이 활성화된 상태라면 언어만 변경하고 인식은 계속 유지
+                        if (isListening) {
+                          console.log('🎯 음성인식 중 언어 변경:', newSourceLanguage);
+                          webSpeechService.setLanguage(newSourceLanguage);
+                          setStatus(`언어 변경됨 (${newSourceLanguage}) - 음성인식 계속`);
+                        }
+                        
                         // 동기화 서비스에 언어 설정 업데이트
                         syncService.updateData({
-                          sourceLanguage: e.target.value,
+                          sourceLanguage: newSourceLanguage,
                           targetLanguage: targetLanguage,
                           isListening: isListening,
                           status: status
