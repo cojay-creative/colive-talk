@@ -2,30 +2,59 @@
 // 서버 사이드에서는 import하지 않음
 let pipeline: any = null;
 
-// 브라우저에서만 동적으로 import
+// 브라우저에서만 동적으로 import (강화된 오류 처리)
 const loadTransformers = async () => {
-  if (typeof window === 'undefined') return null;
-  if (pipeline) return pipeline;
+  if (typeof window === 'undefined') {
+    throw new Error('서버 환경에서는 Whisper 사용 불가');
+  }
+  
+  if (pipeline) {
+    console.log('🔄 기존 Whisper 파이프라인 재사용');
+    return pipeline;
+  }
   
   try {
-    // 환경 변수 설정으로 브라우저 모드 강제
+    console.log('🚀 Transformers 라이브러리 로딩 시작...');
+    
+    // 브라우저 환경 강제 설정
     if (typeof globalThis !== 'undefined') {
       globalThis.XENOVA_TRANSFORMERS_ENV = 'browser';
+      console.log('✅ 브라우저 환경 강제 설정 완료');
     }
     
+    // 동적 import 시도
     const transformers = await import('@xenova/transformers');
+    console.log('✅ @xenova/transformers 라이브러리 로드 성공');
     
-    // 환경 설정 확인
-    if (transformers.env) {
-      transformers.env.backends.onnx.wasm.numThreads = 1;
-      transformers.env.backends.onnx.wasm.simd = true;
+    // WASM 백엔드 최적화 설정
+    if (transformers.env && transformers.env.backends) {
+      try {
+        transformers.env.backends.onnx.wasm.numThreads = 1;
+        transformers.env.backends.onnx.wasm.simd = true;
+        console.log('✅ WASM 백엔드 최적화 설정 완료');
+      } catch (envError) {
+        console.warn('⚠️ WASM 설정 실패 (계속 진행):', envError);
+      }
     }
     
     pipeline = transformers.pipeline;
+    console.log('✅ Whisper 파이프라인 준비 완료');
     return pipeline;
+    
   } catch (error) {
-    console.error('❌ Transformers 로딩 실패:', error);
-    throw new Error(`Transformers 라이브러리 로딩 실패: ${error}`);
+    console.error('❌ Transformers 라이브러리 로딩 실패:');
+    console.error('   오류 타입:', error.constructor.name);
+    console.error('   오류 메시지:', error.message);
+    console.error('   전체 스택:', error);
+    
+    // 구체적인 오류 메시지 제공
+    if (error.message && error.message.includes('require')) {
+      throw new Error('브라우저 호환성 문제: require() 함수 사용 불가');
+    } else if (error.message && error.message.includes('node:')) {
+      throw new Error('Node.js 모듈 호환성 문제');
+    } else {
+      throw new Error(`Whisper 라이브러리 로딩 실패: ${error.message}`);
+    }
   }
 };
 
@@ -85,53 +114,72 @@ export class WhisperSpeechService {
   }
 
   async initialize(): Promise<boolean> {
-    if (this.isInitialized) return true;
+    if (this.isInitialized) {
+      console.log('🔄 Whisper 이미 초기화됨');
+      return true;
+    }
+    
     if (typeof window === 'undefined') {
-      console.warn('⚠️ Whisper는 브라우저에서만 작동합니다');
+      console.warn('⚠️ 서버 환경: Whisper 초기화 건너뜀');
       return false;
     }
 
     try {
-      this.updateStatus('AI 음성인식 모델 준비 중...');
+      this.updateStatus('🤖 AI 음성인식 모델 준비 중...');
       console.log('🚀 Whisper 모델 로딩 시작:', `openai/${this.config.model}`);
 
-      // 동적으로 transformers 로드
+      // Transformers 라이브러리 로드
       const pipelineFunc = await loadTransformers();
       if (!pipelineFunc) {
-        throw new Error('Transformers 라이브러리 로딩 실패');
+        throw new Error('Transformers 파이프라인 함수 없음');
       }
 
+      console.log('🎯 AI 모델 다운로드 시작...');
+      
       // 진행률 표시와 함께 모델 로드
       let lastPercent = 0;
       this.transcriber = await pipelineFunc(
         'automatic-speech-recognition',
         `openai/${this.config.model}`,
         {
-          dtype: 'fp32',  // 호환성을 위해 fp32 사용
-          device: 'webgpu', // GPU 가속 시도, 실패시 자동으로 WASM으로 fallback
+          dtype: 'fp32',           // 호환성 최우선
+          device: 'wasm',          // WASM으로 안정성 확보 (WebGPU는 불안정할 수 있음)
           progress_callback: (progress: any) => {
-            if (progress.status === 'downloading') {
-              const percent = Math.round(progress.progress * 100);
-              if (percent > lastPercent) {
-                lastPercent = percent;
-                this.updateStatus(`AI 모델 다운로드: ${percent}%`);
-                console.log(`📥 모델 다운로드: ${percent}%`);
+            try {
+              if (progress && progress.status === 'downloading' && progress.progress) {
+                const percent = Math.round(progress.progress * 100);
+                if (percent > lastPercent) {
+                  lastPercent = percent;
+                  this.updateStatus(`🤖 AI 모델 다운로드: ${percent}%`);
+                  console.log(`📥 Whisper 모델 다운로드: ${percent}%`);
+                }
+              } else if (progress && progress.status === 'loading') {
+                this.updateStatus('🤖 AI 모델 로딩 중...');
+                console.log('🔄 Whisper 모델 메모리 로딩...');
               }
-            } else if (progress.status === 'loading') {
-              this.updateStatus('AI 모델 로딩 중...');
+            } catch (progressError) {
+              console.warn('⚠️ 진행률 표시 오류 (무시):', progressError);
             }
           }
         }
       );
 
       this.isInitialized = true;
-      this.updateStatus('🤖 AI 음성인식 준비 완료');
-      console.log('✅ Whisper 모델 로딩 완료');
+      this.updateStatus('🤖 AI 음성인식 준비 완료 (99개 언어 지원)');
+      console.log('✅ Whisper AI 초기화 완료! 고품질 음성인식 사용 가능');
       return true;
 
     } catch (error) {
-      console.error('❌ Whisper 초기화 실패:', error);
-      this.handleError(`AI 모델 로딩 실패: ${error}`);
+      console.error('❌ Whisper 초기화 실패:');
+      console.error('   오류:', error);
+      
+      this.isInitialized = false;
+      this.transcriber = null;
+      
+      const errorMsg = `AI 모델 로딩 실패: ${error.message || error}`;
+      this.handleError(errorMsg);
+      console.log('🔄 Web Speech API로 폴백 예정...');
+      
       return false;
     }
   }

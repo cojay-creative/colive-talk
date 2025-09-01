@@ -4,9 +4,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import ErrorBoundary from '../components/ErrorBoundary';
 import Header from '../components/Header';
 import Sidebar from '../components/Sidebar';
-// import { webSpeechService } from '../lib/speech';
-// import { whisperSpeechService as webSpeechService } from '../lib/whisper-speech'; // Whisper로 교체
-import { hybridSpeechService as webSpeechService } from '../lib/hybrid-speech'; // 하이브리드 서비스 (Whisper + 폴백) - Edge Requests 절약
+// import { webSpeechService } from '../lib/speech'; 
+// import { whisperSpeechService as webSpeechService } from '../lib/whisper-speech'; 
+import { hybridSpeechService as webSpeechService } from '../lib/hybrid-speech'; // 🤖 Whisper AI 우선, Web Speech 폴백
 import { freeTranslationService } from '../lib/translate';
 import { syncService } from '../lib/sync';
 
@@ -880,13 +880,15 @@ export default function Home() {
 
               {/* 마이크 설정 */}
               <div className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg p-4 shadow-sm border transition-all duration-300`}>
-                <h3 className={`text-lg font-bold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>🔄 스마트 음성인식</h3>
-                <div className="mb-4 p-3 rounded-lg bg-gradient-to-r from-blue-50 to-green-50 border-l-4 border-blue-400">
-                  <p className="text-sm text-blue-700">
-                    <strong>🤖 AI 우선 모드</strong> - Whisper AI 시도 → 기본 음성인식으로 자동 폴백
+                <h3 className={`text-lg font-bold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-800'}`}>🤖 Whisper AI 음성인식</h3>
+                <div className="mb-4 p-3 rounded-lg bg-gradient-to-r from-purple-50 to-blue-50 border-l-4 border-purple-400">
+                  <p className="text-sm text-purple-700">
+                    <strong>✨ AI 우선 모드</strong> - OpenAI Whisper AI 모델 (로컬 처리)
                     {!isListening && (
-                      <span className="block mt-1 text-blue-600">
-                        AI 사용 가능 시: 99개 언어, 최고 품질 | 폴백: 빠른 시작, 안정적
+                      <span className="block mt-1 text-purple-600">
+                        🌍 99개 언어 지원 | 🎯 최고 품질 인식 | 🔒 개인정보 보호 (로컬 처리)
+                        <br />
+                        <span className="text-xs text-purple-500">※ AI 로딩 실패 시 브라우저 기본 음성인식으로 자동 전환</span>
                       </span>
                     )}
                   </p>
@@ -901,7 +903,7 @@ export default function Home() {
                         : 'bg-[#00B1A9] hover:bg-[#008F87] text-white shadow-md hover:shadow-lg'
                     }`}
                   >
-                    {isListening ? '🎤 AI 인식 중지' : '🤖 AI 인식 시작'}
+{isListening ? '⏹️ Whisper AI 중지' : '🚀 Whisper AI 시작'}
                   </button>
                   
                   <button

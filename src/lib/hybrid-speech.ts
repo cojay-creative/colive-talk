@@ -18,28 +18,63 @@ export class HybridSpeechService {
     this.detectCapabilities();
   }
 
-  // 브라우저 능력 감지
+  // 브라우저 능력 감지 (Whisper AI 우선, 안전한 폴백)
   private async detectCapabilities() {
+    console.log('🎯 Whisper AI 음성인식 초기화 시작...');
+    
+    // 기본 Web Speech API 지원 확인 (필수 폴백)
+    const hasWebSpeech = typeof window !== 'undefined' && 
+      (('webkitSpeechRecognition' in window) || ('SpeechRecognition' in window));
+    
+    if (!hasWebSpeech) {
+      console.error('❌ 브라우저가 음성인식을 지원하지 않습니다');
+      this.useWhisper = false;
+      this.updateStatus('❌ 음성인식 미지원 브라우저');
+      return;
+    }
+    
     try {
-      // Whisper 사용 가능성 확인
+      // Whisper AI 로딩 시도 (주요 기능)
       if (typeof window !== 'undefined' && 'MediaRecorder' in window) {
-        console.log('🤖 Whisper 지원 감지 시도 중...');
+        console.log('🚀 Whisper AI 모델 로딩 중...');
+        this.updateStatus('🤖 AI 모델 준비 중...');
         
-        // 동적으로 Whisper 서비스 로드 시도
-        const { WhisperSpeechService } = await import('./whisper-speech');
-        this.whisperService = new WhisperSpeechService();
+        // 시간 제한으로 무한 대기 방지
+        const whisperPromise = import('./whisper-speech').then(async (module) => {
+          const whisperService = new module.WhisperSpeechService();
+          
+          // Whisper 초기화 테스트
+          const initSuccess = await whisperService.initialize();
+          if (!initSuccess) {
+            throw new Error('Whisper 초기화 실패');
+          }
+          
+          return whisperService;
+        });
+        
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Whisper 로딩 시간 초과 (10초)')), 10000);
+        });
+        
+        this.whisperService = await Promise.race([whisperPromise, timeoutPromise]);
         this.useWhisper = true;
         
-        console.log('✅ Whisper 모드 활성화');
-        this.updateStatus('🤖 AI 음성인식 사용 가능');
+        console.log('✅ Whisper AI 활성화 성공! (99개 언어 지원)');
+        this.updateStatus('🤖 AI 음성인식 준비 완료');
+        
       } else {
-        throw new Error('Whisper 요구사항 미충족');
+        throw new Error('MediaRecorder API 미지원');
       }
     } catch (error) {
-      console.warn('⚠️ Whisper 로딩 실패, Web Speech API로 폴백:', error);
+      console.warn('⚠️ Whisper AI 초기화 실패, Web Speech API로 안전하게 폴백:', error);
+      console.warn('   에러 상세:', error);
+      
       this.useWhisper = false;
-      this.updateStatus('🎤 기본 음성인식 사용');
+      this.whisperService = null;
+      this.updateStatus('🎤 기본 음성인식 사용 (안정 모드)');
     }
+    
+    console.log(`🎯 최종 음성인식: ${this.useWhisper ? '🤖 Whisper AI (고품질)' : '🎤 Web Speech API (호환성)'}`);
   }
 
   // 기존 API와 동일한 인터페이스
