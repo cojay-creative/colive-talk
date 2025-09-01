@@ -412,8 +412,10 @@ export default function Home() {
           }
         } catch (importError) {
           console.error('❌ whisper-speech 모듈 import 실패:', importError);
-          console.error('오류 상세:', importError.message, importError.stack);
-          setServiceLoadError(`Whisper 모듈 import 실패: ${importError.message}`);
+          const errorMessage = importError instanceof Error ? importError.message : String(importError);
+          const errorStack = importError instanceof Error ? importError.stack : undefined;
+          console.error('오류 상세:', errorMessage, errorStack);
+          setServiceLoadError(`Whisper 모듈 import 실패: ${errorMessage}`);
         }
       }, 1000);
       setSessionId(userSessionId);

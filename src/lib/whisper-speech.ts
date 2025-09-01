@@ -19,7 +19,7 @@ const loadTransformers = async () => {
     
     // 브라우저 환경 강제 설정
     if (typeof globalThis !== 'undefined') {
-      globalThis.XENOVA_TRANSFORMERS_ENV = 'browser';
+      (globalThis as any).XENOVA_TRANSFORMERS_ENV = 'browser';
       console.log('✅ 브라우저 환경 강제 설정 완료');
     }
     
@@ -45,17 +45,18 @@ const loadTransformers = async () => {
     
   } catch (error) {
     console.error('❌ Transformers 라이브러리 로딩 실패:');
-    console.error('   오류 타입:', error.constructor.name);
-    console.error('   오류 메시지:', error.message);
+    const err = error as any;
+    console.error('   오류 타입:', err?.constructor?.name);
+    console.error('   오류 메시지:', err?.message);
     console.error('   전체 스택:', error);
     
     // 구체적인 오류 메시지 제공
-    if (error.message && error.message.includes('require')) {
+    if (err?.message && err.message.includes('require')) {
       throw new Error('브라우저 호환성 문제: require() 함수 사용 불가');
-    } else if (error.message && error.message.includes('node:')) {
+    } else if (err?.message && err.message.includes('node:')) {
       throw new Error('Node.js 모듈 호환성 문제');
     } else {
-      throw new Error(`Whisper 라이브러리 로딩 실패: ${error.message}`);
+      throw new Error(`Whisper 라이브러리 로딩 실패: ${err?.message || 'Unknown error'}`);
     }
   }
 };
@@ -195,7 +196,7 @@ export class WhisperSpeechService {
       this.isInitialized = false;
       this.transcriber = null;
       
-      const errorMsg = `AI 모델 로딩 실패: ${error.message || error}`;
+      const errorMsg = `AI 모델 로딩 실패: ${error instanceof Error ? error.message : String(error)}`;
       this.handleError(errorMsg);
       console.log('🔄 Web Speech API로 폴백 예정...');
       
@@ -264,7 +265,7 @@ export class WhisperSpeechService {
 
     } catch (error) {
       console.error('❌ 음성인식 시작 실패:', error);
-      this.handleError(`음성인식 시작 실패: ${error}`);
+      this.handleError(`음성인식 시작 실패: ${error instanceof Error ? error.message : String(error)}`);
       return false;
     }
   }
