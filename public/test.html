@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>JavaScript Test</title>
+</head>
+<body>
+    <h1>JavaScript 테스트 페이지</h1>
+    <p id="result">JavaScript 로딩 중...</p>
+    
+    <script>
+        console.log('✅ 정적 HTML JavaScript 실행됨');
+        document.getElementById('result').textContent = '✅ JavaScript가 정상 작동합니다';
+        
+        // 추가 테스트
+        try {
+            fetch('/api/subtitle-status?sessionId=test')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('✅ API 호출 성공:', data);
+                    document.getElementById('result').textContent += ' | API 연결 성공';
+                })
+                .catch(error => {
+                    console.error('❌ API 호출 실패:', error);
+                    document.getElementById('result').textContent += ' | API 연결 실패';
+                });
+        } catch (error) {
+            console.error('❌ Fetch 오류:', error);
+        }
+    </script>
+</body>
+</html>
